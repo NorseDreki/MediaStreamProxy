@@ -42,7 +42,7 @@ public class StreamProxyTest {
         try {
             ss = new ServerSocket(port);
             ss.setReuseAddress(true);
-            return true;
+            return false;
         } catch (IOException e) {
         } finally {
             if (ss != null) {
@@ -54,6 +54,6 @@ public class StreamProxyTest {
             }
         }
 
-        return false;
+        return true;
     }
 }

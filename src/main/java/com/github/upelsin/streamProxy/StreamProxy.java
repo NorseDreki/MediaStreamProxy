@@ -23,6 +23,7 @@ import java.util.StringTokenizer;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 
@@ -53,23 +54,23 @@ public class StreamProxy implements Runnable {
     public StreamProxy(Object o) {
     }
 
-    public void init() {
+    public void start() {
         try {
             socket = new ServerSocket(PROXY_PORT, 0, InetAddress.getByAddress(new byte[] {127,0,0,1}));
             socket.setSoTimeout(0); //was 5000
             int port = socket.getLocalPort();
             //Log.d(LOG_TAG, "Port " + port + " obtained for proxy");
         } catch (UnknownHostException e) {
+            logger.log(Level.SEVERE, "");
             //Log.e(LOG_TAG, "Error initializing server", e);
         } catch (IOException e) {
+            logger.log(Level.SEVERE, "");
             //Log.e(LOG_TAG, "Error initializing server", e);
         }
 
         processing = new ReentrantLock();
         service = Executors.newFixedThreadPool(5);
-    }
 
-    public void start() {
         //Log.d(LOG_TAG, "Starting proxy");
         if (socket == null) {
             throw new IllegalStateException("Cannot start proxy; it has not been initialized.");
@@ -385,5 +386,9 @@ public class StreamProxy implements Runnable {
             //client.close();
             //Log.w(LOG_TAG, "Closed client");
         }
+    }
+
+    public int getPort() {
+        return 22333;
     }
 }
