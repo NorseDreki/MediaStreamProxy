@@ -1,4 +1,4 @@
-package com.squirrel.android.httpProxy;
+package com.github.upelsin.streamProxy;
 
 import java.io.OutputStream;
 import java.util.Properties;

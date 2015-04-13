@@ -1,7 +1,4 @@
-package com.squirrel.android.proxy;
-
-import android.net.Uri;
-import android.util.Log;
+package com.github.upelsin.streamProxy;
 
 import org.apache.http.Header;
 import org.apache.http.HttpRequest;
@@ -17,17 +14,8 @@ import org.apache.http.impl.conn.SingleClientConnManager;
 import org.apache.http.message.BasicHttpRequest;
 import org.apache.http.message.BasicHttpResponse;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.net.InetAddress;
-import java.net.ServerSocket;
-import java.net.Socket;
-import java.net.SocketException;
-import java.net.SocketTimeoutException;
-import java.net.UnknownHostException;
+import java.io.*;
+import java.net.*;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
@@ -35,12 +23,15 @@ import java.util.StringTokenizer;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.logging.Logger;
 
 
-public class AudioStreamProxy implements Runnable {
+public class StreamProxy implements Runnable {
     public static final int PROXY_PORT = 22333;
 
-    private static final String LOG_TAG = AudioStreamProxy.class.getSimpleName();
+    private Logger logger = Logger.getLogger(StreamProxy.class.getName());
+
+    private static final String LOG_TAG = StreamProxy.class.getSimpleName();
 
     private ServerSocket socket;
     private Thread thread;
@@ -59,7 +50,7 @@ public class AudioStreamProxy implements Runnable {
         this.streamFactory = streamFactory;
     }*/
 
-    public AudioStreamProxy(Object o) {
+    public StreamProxy(Object o) {
     }
 
     public void init() {
@@ -67,11 +58,11 @@ public class AudioStreamProxy implements Runnable {
             socket = new ServerSocket(PROXY_PORT, 0, InetAddress.getByAddress(new byte[] {127,0,0,1}));
             socket.setSoTimeout(0); //was 5000
             int port = socket.getLocalPort();
-            Log.d(LOG_TAG, "Port " + port + " obtained for proxy");
+            //Log.d(LOG_TAG, "Port " + port + " obtained for proxy");
         } catch (UnknownHostException e) {
-            Log.e(LOG_TAG, "Error initializing server", e);
+            //Log.e(LOG_TAG, "Error initializing server", e);
         } catch (IOException e) {
-            Log.e(LOG_TAG, "Error initializing server", e);
+            //Log.e(LOG_TAG, "Error initializing server", e);
         }
 
         processing = new ReentrantLock();
@@ -79,7 +70,7 @@ public class AudioStreamProxy implements Runnable {
     }
 
     public void start() {
-        Log.d(LOG_TAG, "Starting proxy");
+        //Log.d(LOG_TAG, "Starting proxy");
         if (socket == null) {
             throw new IllegalStateException("Cannot start proxy; it has not been initialized.");
         }
@@ -89,7 +80,7 @@ public class AudioStreamProxy implements Runnable {
     }
 
     public void stop() {
-        Log.w(LOG_TAG, "Stopping proxy");
+        //Log.w(LOG_TAG, "Stopping proxy");
         isRunning = false;
 
         if (thread == null) {
@@ -105,12 +96,12 @@ public class AudioStreamProxy implements Runnable {
     }
 
     public void interruptRequest() {
-        Log.d(LOG_TAG, "Interrupting request processing...");
+        //Log.d(LOG_TAG, "Interrupting request processing...");
         streamingAllowed = false;
 
         try {
             processing.lock();
-            Log.d(LOG_TAG, "Request interrupted");
+            //Log.d(LOG_TAG, "Request interrupted");
         } finally {
             processing.unlock();
         }
@@ -118,10 +109,10 @@ public class AudioStreamProxy implements Runnable {
 
     @Override
     public void run() {
-        android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
+        //android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
 
         while (isRunning) {
-            Log.v(LOG_TAG, "Proxy is alive...");
+            //Log.v(LOG_TAG, "Proxy is alive...");
             try {
                 final Socket client = socket.accept();
                 if (client == null) {
@@ -133,9 +124,9 @@ public class AudioStreamProxy implements Runnable {
                 try {
                     processing.lock();
 
-                    Log.d(LOG_TAG, Thread.currentThread().getName() + "Client connected: " + client.getInetAddress().toString()
+              /*      Log.d(LOG_TAG, Thread.currentThread().getName() + "Client connected: " + client.getInetAddress().toString()
                             + ". Keep alive: " + client.getKeepAlive());
-
+*/
                     streamingAllowed = true;
 
                     /*HttpRequest request = readRequest(client);
@@ -170,12 +161,12 @@ public class AudioStreamProxy implements Runnable {
                 }
 
             } catch (SocketTimeoutException e) {
-                Log.w(LOG_TAG, "Socket timeout");
+                //Log.w(LOG_TAG, "Socket timeout");
             } catch (IOException e) {
-                Log.e(LOG_TAG, "Error connecting to client", e);
+                //Log.e(LOG_TAG, "Error connecting to client", e);
             }
         }
-        Log.w(LOG_TAG, "Proxy interrupted. Shutting down.");
+        //Log.w(LOG_TAG, "Proxy interrupted. Shutting down.");
     }
 
     private HttpRequest readRequest(Socket client) {
@@ -192,7 +183,7 @@ public class AudioStreamProxy implements Runnable {
 
             String inputLine;
             while (!(inputLine = reader.readLine()).equals("")) {
-                Log.i(LOG_TAG, "ZZZZ" + inputLine);
+                //Log.i(LOG_TAG, "ZZZZ" + inputLine);
                 headers.put(inputLine.split(": ")[0],
                         inputLine.split(": ")[1]);
             }
@@ -211,12 +202,12 @@ public class AudioStreamProxy implements Runnable {
             Log.i(LOG_TAG, string);*/
 
         } catch (IOException e) {
-            Log.e(LOG_TAG, "Error parsing request", e);
+            //Log.e(LOG_TAG, "Error parsing request", e);
             return request;
         }
 
         if (firstLine == null) {
-            Log.i(LOG_TAG, "Proxy client closed connection without a request.");
+            //Log.i(LOG_TAG, "Proxy client closed connection without a request.");
             return request;
         }
 
@@ -233,7 +224,7 @@ public class AudioStreamProxy implements Runnable {
 
         outputStream = streamFactory.createOutputStream(props);*/
 
-        Log.d(LOG_TAG, "Client requested: " + realUri);
+        //Log.d(LOG_TAG, "Client requested: " + realUri);
         request = new BasicHttpRequest(method, realUri);
 
         for (Map.Entry<String, String> entry : headers.entrySet()) {
@@ -287,13 +278,13 @@ public class AudioStreamProxy implements Runnable {
 
         HttpResponse response = null;
         try {
-            Log.d(LOG_TAG, "Executing real request...");
+           // Log.d(LOG_TAG, "Executing real request...");
             response = http.execute(method);
-            Log.d(LOG_TAG, "Executed");
+          //  Log.d(LOG_TAG, "Executed");
         } catch (ClientProtocolException e) {
-            Log.e(LOG_TAG, "Error executing", e);
+           // Log.e(LOG_TAG, "Error executing", e);
         } catch (IOException e) {
-            Log.e(LOG_TAG, "Error executing", e);
+           // Log.e(LOG_TAG, "Error executing", e);
         }
         return response;
     }
@@ -303,18 +294,18 @@ public class AudioStreamProxy implements Runnable {
         if (request == null) {
             return;
         }
-        Log.d(LOG_TAG, "Processing");
+        //Log.d(LOG_TAG, "Processing");
         String url = request.getRequestLine().getUri();
         HttpResponse realResponse = download(url, request);
         if (realResponse == null) {
             return;
         }
 
-        Uri parsed = Uri.parse(url);
+       // Uri parsed = Uri.parse(url);
 
         Properties props = new Properties();
-        props.setProperty("artist", parsed.getQueryParameter("artist"));
-        props.setProperty("track", parsed.getQueryParameter("track"));
+        //props.setProperty("artist", parsed.getQueryParameter("artist"));
+        //props.setProperty("track", parsed.getQueryParameter("track"));
 
         OutputStream outputStream = null;//streamFactory.createOutputStream(props);
 
@@ -323,7 +314,7 @@ public class AudioStreamProxy implements Runnable {
         HttpResponse response = new BasicHttpResponse(line);
         response.setHeaders(realResponse.getAllHeaders());
 
-        Log.d(LOG_TAG, "Reading headers");
+        //Log.d(LOG_TAG, "Reading headers");
         StringBuilder httpString = new StringBuilder();
         httpString.append(response.getStatusLine().toString());
 
@@ -332,12 +323,12 @@ public class AudioStreamProxy implements Runnable {
             httpString.append(h.getName()).append(": ").append(h.getValue()).append("\r\n"); //was httpString.append("\n");
         }
         httpString.append("\r\n"); //was httpString.append("\n");
-        Log.d(LOG_TAG, "Copying headers done");
+        //Log.d(LOG_TAG, "Copying headers done");
 
         try {
             int slicer = 0;
             int readBytes = 0;
-            Log.d(LOG_TAG, Thread.currentThread().getName() + "Writing to client...");
+            //Log.d(LOG_TAG, Thread.currentThread().getName() + "Writing to client...");
             byte[] buffer = httpString.toString().getBytes();
             client.getOutputStream().write(buffer, 0, buffer.length);
             byte[] buff = new byte[1024 * 64];
@@ -348,17 +339,17 @@ public class AudioStreamProxy implements Runnable {
                     && (readBytes /*= data.read(buff, 0, buff.length)*/) != -1) {
 
                 if (slicer % 25 == 0)
-                Log.d("WWWW", Thread.currentThread().getName() + "Reading bytes...");
+                //Log.d("WWWW", Thread.currentThread().getName() + "Reading bytes...");
 
                 readBytes = data.read(buff, 0, buff.length);
                 if (readBytes == -1) break;
 
                 if (slicer % 25 == 0)
-                Log.d("WWWW", Thread.currentThread().getName() + "Read bytes: " + readBytes);
+                //Log.d("WWWW", Thread.currentThread().getName() + "Read bytes: " + readBytes);
 
                 client.getOutputStream().write(buff, 0, readBytes);
                 if (slicer % 25 == 0)
-                Log.d("WWWW", Thread.currentThread().getName() + "Written bytes: " + readBytes);
+                //Log.d("WWWW", Thread.currentThread().getName() + "Written bytes: " + readBytes);
 
                 slicer++;
 
@@ -371,11 +362,11 @@ public class AudioStreamProxy implements Runnable {
                 //outputStream.write(buff, 0, readBytes);
             }
         } catch (SocketException e) {
-            Log.w(LOG_TAG, Thread.currentThread().getName() + "Looks like MediaPlayer has disconnected", e);
+            //Log.w(LOG_TAG, Thread.currentThread().getName() + "Looks like MediaPlayer has disconnected", e);
         } catch (Exception e) {
-            Log.e(LOG_TAG, Thread.currentThread().getName() + "Exception!", e);
+           // Log.e(LOG_TAG, Thread.currentThread().getName() + "Exception!", e);
         } finally {
-            Log.w(LOG_TAG, Thread.currentThread().getName() + "Stopped streaming");
+           // Log.w(LOG_TAG, Thread.currentThread().getName() + "Stopped streaming");
             streamingAllowed = true; //allow it back
 
             //outputStream.close();
@@ -392,7 +383,7 @@ public class AudioStreamProxy implements Runnable {
 
 
             //client.close();
-            Log.w(LOG_TAG, "Closed client");
+            //Log.w(LOG_TAG, "Closed client");
         }
     }
 }

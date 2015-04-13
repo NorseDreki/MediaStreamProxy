@@ -1,0 +1,49 @@
+apply plugin: 'java'
+apply plugin: 'maven'
+
+configure(install.repositories.mavenInstaller) {
+    pom.project {
+        groupId 'com.github.upelsin'
+        artifactId 'rxjava-cache-dispatcher'
+        inceptionYear '2015'
+        packaging 'jar'
+        licenses {
+            license {
+                name 'The Apache Software License, Version 2.0'
+                url 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                distribution 'repo'
+            }
+        }
+    }
+}
+
+task sourcesJar(type: Jar, dependsOn: classes) {
+    classifier = 'sources'
+    from sourceSets.main.allSource
+}
+
+task javadocJar(type: Jar, dependsOn: javadoc) {
+    classifier = 'javadoc'
+    from javadoc.destinationDir
+}
+
+artifacts {
+    archives sourcesJar
+    archives javadocJar
+}
+
+sourceCompatibility = 1.6
+version = '0.1-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    compile 'org.apache.httpcomponents:httpclient:4.4.1'
+
+
+    testCompile 'junit:junit:4.11'
+    testCompile 'org.mockito:mockito-core:1.9.5'
+    testCompile 'com.squareup.okhttp:mockwebserver:2.3.0'
+}
