@@ -28,7 +28,6 @@ import java.util.logging.Logger;
 
 
 public class StreamProxy implements Runnable {
-    public static final int PROXY_PORT = 22333;
 
     private Logger logger = Logger.getLogger(StreamProxy.class.getName());
 
@@ -56,13 +55,10 @@ public class StreamProxy implements Runnable {
 
     public void start() {
         try {
-            socket = new ServerSocket(PROXY_PORT, 0, InetAddress.getByAddress(new byte[] {127,0,0,1}));
+            socket = new ServerSocket(0);
             socket.setSoTimeout(0); //was 5000
             int port = socket.getLocalPort();
             //Log.d(LOG_TAG, "Port " + port + " obtained for proxy");
-        } catch (UnknownHostException e) {
-            logger.log(Level.SEVERE, "");
-            //Log.e(LOG_TAG, "Error initializing server", e);
         } catch (IOException e) {
             logger.log(Level.SEVERE, "");
             //Log.e(LOG_TAG, "Error initializing server", e);
@@ -81,12 +77,13 @@ public class StreamProxy implements Runnable {
     }
 
     public void stop() {
+        if (thread == null) {
+            throw new IllegalStateException("Cannot stop proxy, it has not been started");
+        }
+
         //Log.w(LOG_TAG, "Stopping proxy");
         isRunning = false;
 
-        if (thread == null) {
-            throw new IllegalStateException("Cannot stop proxy; it has not been started.");
-        }
 
         thread.interrupt();
         try {
@@ -94,22 +91,19 @@ public class StreamProxy implements Runnable {
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
-    }
-
-    public void interruptRequest() {
-        //Log.d(LOG_TAG, "Interrupting request processing...");
-        streamingAllowed = false;
 
         try {
-            processing.lock();
-            //Log.d(LOG_TAG, "Request interrupted");
-        } finally {
-            processing.unlock();
+            socket.close();
+        } catch (IOException e) {
+            throw new RuntimeException("Error stopping proxy", e);
         }
     }
 
     @Override
     public void run() {
+        if (socket == null) {
+            throw new IllegalStateException("Proxy must be started first");
+        }
         //android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
 
         while (isRunning) {
@@ -389,6 +383,10 @@ public class StreamProxy implements Runnable {
     }
 
     public int getPort() {
-        return 22333;
+        if (socket == null) {
+            throw new IllegalStateException("Proxy must be started before obtaining port number");
+        }
+
+        return socket.getLocalPort();
     }
 }
