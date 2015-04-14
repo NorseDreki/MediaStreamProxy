@@ -22,6 +22,7 @@ import java.util.Properties;
 import java.util.StringTokenizer;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -31,16 +32,15 @@ public class StreamProxy implements Runnable {
 
     private Logger logger = Logger.getLogger(StreamProxy.class.getName());
 
-    private static final String LOG_TAG = StreamProxy.class.getSimpleName();
+    private ServerSocket serverSocket;
 
-    private ServerSocket socket;
     private Thread thread;
 
     private volatile boolean streamingAllowed = true;
     private volatile boolean isRunning = true;
 
     private ReentrantLock processing;
-    private ExecutorService service;
+    private ExecutorService executor;
 
     private IOutputStreamFactory streamFactory;
 
@@ -50,20 +50,12 @@ public class StreamProxy implements Runnable {
 
     public void start() {
         try {
-            socket = new ServerSocket(0);
-
+            serverSocket = new ServerSocket(0);
         } catch (IOException e) {
-            logger.log(Level.SEVERE, "");
-            //Log.e(LOG_TAG, "Error initializing server", e);
+            throw new ProxyNotStartedException(e);
         }
 
-        processing = new ReentrantLock();
-        service = Executors.newFixedThreadPool(5);
-
-        //Log.d(LOG_TAG, "Starting proxy");
-        if (socket == null) {
-            throw new IllegalStateException("Cannot start proxy; it has not been initialized.");
-        }
+        executor = Executors.newCachedThreadPool();
 
         thread = new Thread(this);
         thread.start();
@@ -76,72 +68,40 @@ public class StreamProxy implements Runnable {
 
         isRunning = false; //TODO remove
 
+        executor.shutdownNow();
+
         thread.interrupt();
-        closeQuietly(socket);
+        closeQuietly(serverSocket);
         joinUninterruptibly(thread);
     }
 
     @Override
     public void run() {
-        if (socket == null) {
+        if (serverSocket == null) {
             throw new IllegalStateException("Proxy must be started first");
         }
 
         while (!Thread.currentThread().isInterrupted()) {
             try {
-                final Socket client = socket.accept(); //set socket timeout
-                if (client == null) {
-                    continue;
-                }
-
-                client.setSendBufferSize(1024);
-
-                try {
-                    processing.lock();
-
-              /*      Log.d(LOG_TAG, Thread.currentThread().getName() + "Client connected: " + client.getInetAddress().toString()
-                            + ". Keep alive: " + client.getKeepAlive());
-*/
-                    streamingAllowed = true;
-
-                    /*HttpRequest request = readRequest(client);
-                    try {
-                        processRequest(request, client);
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }*/
-
-                    Runnable r = new Runnable() {
-                        @Override
-                        public void run() {
-                            HttpRequest request = readRequest(client);
-                            try {
-                                processRequest(request, client);
-                            } catch (IOException e) {
-                                e.printStackTrace();
-                            }
+                final Socket clientSocket = serverSocket.accept();
+                executor.execute(new Runnable() {
+                    @Override
+                    public void run() {
+                        HttpRequest request = readRequest(clientSocket);
+                        try {
+                            processRequest(request, clientSocket);
+                        } catch (IOException e) {
+                            e.printStackTrace();
                         }
-                    };
-
-
-                    service.execute(r);
-
-                    /*if (runner != null) {
-                        runner.interrupt();
                     }
-                    runner = new Thread();
-                    runner.start();*/
-                } finally {
-                    processing.unlock();
-                }
+                });
 
-            } catch (SocketTimeoutException e) {
-                //Log.w(LOG_TAG, "Socket timeout");
             } catch (IOException e) {
-                //Log.e(LOG_TAG, "Error connecting to client", e);
+                logger.log(Level.WARNING, "Exception while processing connection from client", e);
+            } catch (Exception e) {
+                logger.log(Level.SEVERE, "Exception while processing connection from client", e);
             }
         }
-        //Log.w(LOG_TAG, "Proxy interrupted. Shutting down.");
     }
 
     private HttpRequest readRequest(Socket client) {
@@ -286,7 +246,7 @@ public class StreamProxy implements Runnable {
                 if (slicer % 25 == 0)
                     //Log.d("WWWW", Thread.currentThread().getName() + "Reading bytes...");
 
-                readBytes = data.read(buff, 0, buff.length);
+                    readBytes = data.read(buff, 0, buff.length);
                 if (readBytes == -1) {
                     break;
                 }
@@ -294,11 +254,11 @@ public class StreamProxy implements Runnable {
                 if (slicer % 25 == 0)
                     //Log.d("WWWW", Thread.currentThread().getName() + "Read bytes: " + readBytes);
 
-                client.getOutputStream().write(buff, 0, readBytes);
+                    client.getOutputStream().write(buff, 0, readBytes);
                 if (slicer % 25 == 0)
                     //Log.d("WWWW", Thread.currentThread().getName() + "Written bytes: " + readBytes);
 
-                slicer++;
+                    slicer++;
 
                 outputStream.write(buff, 0, readBytes);
 
@@ -350,11 +310,11 @@ public class StreamProxy implements Runnable {
     }
 
     public int getPort() {
-        if (socket == null) {
+        if (serverSocket == null) {
             throw new IllegalStateException("Proxy must be started before obtaining port number");
         }
 
-        return socket.getLocalPort();
+        return serverSocket.getLocalPort();
     }
 
     public void closeQuietly(ServerSocket socket) {
@@ -365,6 +325,29 @@ public class StreamProxy implements Runnable {
                 throw rethrown;
             } catch (Exception ignored) {
             }
+        }
+    }
+
+    private static class ExceptionHandlingThreadFactory implements ThreadFactory {
+        private static final ThreadFactory defaultFactory = Executors.defaultThreadFactory();
+        private final Thread.UncaughtExceptionHandler handler;
+
+        public ExceptionHandlingThreadFactory(Thread.UncaughtExceptionHandler handler) {
+            this.handler = handler;
+        }
+
+        @Override
+        public Thread newThread(Runnable run) {
+            Thread thread = defaultFactory.newThread(run);
+            thread.setUncaughtExceptionHandler(handler);
+            return thread;
+        }
+    }
+
+    private static class MyExceptionHandler implements Thread.UncaughtExceptionHandler {
+        @Override
+        public void uncaughtException(Thread thread, Throwable t) {
+            // Recovery or logging code
         }
     }
 }
