@@ -38,27 +38,20 @@ public class StreamProxy implements Runnable {
 
     private volatile boolean streamingAllowed = true;
     private volatile boolean isRunning = true;
-    private Thread runner;
 
     private ReentrantLock processing;
     private ExecutorService service;
 
-    /*private IOutputStreamFactory streamFactory;
-    private ReentrantLock processing;
+    private IOutputStreamFactory streamFactory;
 
-    public AudioStreamProxy(IOutputStreamFactory streamFactory) {
+    public StreamProxy(IOutputStreamFactory streamFactory) {
         this.streamFactory = streamFactory;
-    }*/
-
-    public StreamProxy(Object o) {
     }
 
     public void start() {
         try {
             socket = new ServerSocket(0);
-            socket.setSoTimeout(0); //was 5000
-            int port = socket.getLocalPort();
-            //Log.d(LOG_TAG, "Port " + port + " obtained for proxy");
+
         } catch (IOException e) {
             logger.log(Level.SEVERE, "");
             //Log.e(LOG_TAG, "Error initializing server", e);
@@ -81,22 +74,11 @@ public class StreamProxy implements Runnable {
             throw new IllegalStateException("Cannot shutdown proxy, it has not been started");
         }
 
-        //Log.w(LOG_TAG, "Stopping proxy");
-        isRunning = false;
-
+        isRunning = false; //TODO remove
 
         thread.interrupt();
-        try {
-            thread.join(15000);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-
-        try {
-            socket.close();
-        } catch (IOException e) {
-            throw new RuntimeException("Error stopping proxy", e);
-        }
+        closeQuietly(socket);
+        joinUninterruptibly(thread);
     }
 
     @Override
@@ -104,10 +86,8 @@ public class StreamProxy implements Runnable {
         if (socket == null) {
             throw new IllegalStateException("Proxy must be started first");
         }
-        //android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
 
-        while (isRunning) {
-            //Log.v(LOG_TAG, "Proxy is alive...");
+        while (!Thread.currentThread().isInterrupted()) {
             try {
                 final Socket client = socket.accept(); //set socket timeout
                 if (client == null) {
@@ -174,27 +154,8 @@ public class StreamProxy implements Runnable {
             BufferedReader reader = new BufferedReader(new InputStreamReader(is), 8192); //header should fit in 8K
             firstLine = reader.readLine();
 
-            headers = new HashMap<String, String>();
+            headers = readHeaders(reader);
 
-            String inputLine;
-            while (!(inputLine = reader.readLine()).equals("")) {
-                //Log.i(LOG_TAG, "ZZZZ" + inputLine);
-                headers.put(inputLine.split(": ")[0],
-                        inputLine.split(": ")[1]);
-            }
-
-            // Map<String, String> map = parseHTTPHeaders(is);
-
-
-            //headers = HttpParser.parseHeaders(is, "UTF-8");
-            /*int ccc = is.available();
-            Log.i(LOG_TAG, ccc+ " bytes available");
-            byte[] bff = new byte[ccc];
-            int read = is.read(bff, 0, bff.length);
-
-            String string = new String(bff);//CharStreams.toString(new InputStreamReader(is, "UTF-8"));
-            //String s = IOUtils.toString(is);
-            Log.i(LOG_TAG, string);*/
 
         } catch (IOException e) {
             //Log.e(LOG_TAG, "Error parsing request", e);
@@ -211,53 +172,49 @@ public class StreamProxy implements Runnable {
         String uri = st.nextToken();
         String realUri = uri.substring(1);
 
-        /*Uri parsed = Uri.parse(realUri);
-
-        Properties props = new Properties();
-        props.setProperty("artist", parsed.getQueryParameter("artist"));
-        props.setProperty("track", parsed.getQueryParameter("track"));
-
-        outputStream = streamFactory.createOutputStream(props);*/
-
         //Log.d(LOG_TAG, "Client requested: " + realUri);
         request = new BasicHttpRequest(method, realUri);
 
-        for (Map.Entry<String, String> entry : headers.entrySet()) {
-            request.addHeader(entry.getKey(), entry.getValue());
-        }
-//        request.addHeader();
-
-        //request.setHeaders((Header[]) headers);
+        addHeaders(request, headers);
 
         return request;
     }
 
-    public static Map<String, String> parseHTTPHeaders(InputStream inputStream)
-            throws IOException {
-        int charRead;
-        StringBuffer sb = new StringBuffer();
-        while (true) {
-            sb.append((char) (charRead = inputStream.read()));
-            if ((char) charRead == '\r') {            // if we've got a '\r'
-                sb.append((char) inputStream.read()); // then write '\n'
-                charRead = inputStream.read();        // read the next char;
-                if (charRead == '\r') {                  // if it's another '\r'
-                    sb.append((char) inputStream.read());// write the '\n'
-                    break;
-                } else {
-                    sb.append((char) charRead);
+    private void addHeaders(HttpRequest request, Map<String, String> headers) {
+        for (Map.Entry<String, String> entry : headers.entrySet()) {
+            request.addHeader(entry.getKey(), entry.getValue());
+        }
+    }
+
+    private Map<String, String> readHeaders(BufferedReader reader) throws IOException {
+        Map<String, String> result = new HashMap<String, String>();
+        String inputLine;
+
+        while (!(inputLine = reader.readLine()).equals("")) {
+            //Log.i(LOG_TAG, "ZZZZ" + inputLine);
+            result.put(inputLine.split(": ")[0],
+                    inputLine.split(": ")[1]);
+        }
+
+        return result;
+    }
+
+    public void joinUninterruptibly(Thread toJoin) {
+        boolean interrupted = false;
+        try {
+            while (true) {
+                try {
+                    toJoin.join();
+                    return;
+                } catch (InterruptedException e) {
+                    interrupted = true;
                 }
             }
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
-
-        String[] headersArray = sb.toString().split("\r\n");
-        Map<String, String> headers = new HashMap<String, String>();
-        for (int i = 1; i < headersArray.length - 1; i++) {
-            headers.put(headersArray[i].split(": ")[0],
-                    headersArray[i].split(": ")[1]);
-        }
-
-        return headers;
     }
 
     private HttpResponse download(String url, HttpRequest request) {
@@ -273,13 +230,13 @@ public class StreamProxy implements Runnable {
 
         HttpResponse response = null;
         try {
-           // Log.d(LOG_TAG, "Executing real request...");
+            //Log.d(LOG_TAG, "Executing real request...");
             response = http.execute(method);
-          //  Log.d(LOG_TAG, "Executed");
+            //Log.d(LOG_TAG, "Executed");
         } catch (ClientProtocolException e) {
-           // Log.e(LOG_TAG, "Error executing", e);
+            //Log.e(LOG_TAG, "Error executing", e);
         } catch (IOException e) {
-           // Log.e(LOG_TAG, "Error executing", e);
+            //Log.e(LOG_TAG, "Error executing", e);
         }
         return response;
     }
@@ -296,13 +253,13 @@ public class StreamProxy implements Runnable {
             return;
         }
 
-       // Uri parsed = Uri.parse(url);
+        //Uri parsed = Uri.parse(url);
 
         Properties props = new Properties();
-        //props.setProperty("artist", parsed.getQueryParameter("artist"));
-        //props.setProperty("track", parsed.getQueryParameter("track"));
+        /*props.setProperty("artist", parsed.getQueryParameter("artist"));
+        props.setProperty("track", parsed.getQueryParameter("track"));*/
 
-        OutputStream outputStream = null;//streamFactory.createOutputStream(props);
+        OutputStream outputStream = streamFactory.createOutputStream(props);
 
         InputStream data = realResponse.getEntity().getContent();
         StatusLine line = realResponse.getStatusLine();
@@ -310,19 +267,12 @@ public class StreamProxy implements Runnable {
         response.setHeaders(realResponse.getAllHeaders());
 
         //Log.d(LOG_TAG, "Reading headers");
-        StringBuilder httpString = new StringBuilder();
-        httpString.append(response.getStatusLine().toString());
-
-        httpString.append("\r\n"); //was httpString.append("\n");
-        for (Header h : response.getAllHeaders()) {
-            httpString.append(h.getName()).append(": ").append(h.getValue()).append("\r\n"); //was httpString.append("\n");
-        }
-        httpString.append("\r\n"); //was httpString.append("\n");
+        StringBuilder httpString = getHeaders(response);
         //Log.d(LOG_TAG, "Copying headers done");
 
+        int slicer = 0;
+        int readBytes = 0;
         try {
-            int slicer = 0;
-            int readBytes = 0;
             //Log.d(LOG_TAG, Thread.currentThread().getName() + "Writing to client...");
             byte[] buffer = httpString.toString().getBytes();
             client.getOutputStream().write(buffer, 0, buffer.length);
@@ -334,37 +284,42 @@ public class StreamProxy implements Runnable {
                     && (readBytes /*= data.read(buff, 0, buff.length)*/) != -1) {
 
                 if (slicer % 25 == 0)
-                //Log.d("WWWW", Thread.currentThread().getName() + "Reading bytes...");
+                    //Log.d("WWWW", Thread.currentThread().getName() + "Reading bytes...");
 
                 readBytes = data.read(buff, 0, buff.length);
-                if (readBytes == -1) break;
+                if (readBytes == -1) {
+                    break;
+                }
 
                 if (slicer % 25 == 0)
-                //Log.d("WWWW", Thread.currentThread().getName() + "Read bytes: " + readBytes);
+                    //Log.d("WWWW", Thread.currentThread().getName() + "Read bytes: " + readBytes);
 
                 client.getOutputStream().write(buff, 0, readBytes);
                 if (slicer % 25 == 0)
-                //Log.d("WWWW", Thread.currentThread().getName() + "Written bytes: " + readBytes);
+                    //Log.d("WWWW", Thread.currentThread().getName() + "Written bytes: " + readBytes);
 
                 slicer++;
 
-                //Log.d("WWWW", "Checking flags");
+                outputStream.write(buff, 0, readBytes);
+
                 if (!streamingAllowed || Thread.currentThread().isInterrupted()) {
                     break;
                 }
-                //Log.d("WWWW", "End of cycle");
 
-                //outputStream.write(buff, 0, readBytes);
             }
         } catch (SocketException e) {
             //Log.w(LOG_TAG, Thread.currentThread().getName() + "Looks like MediaPlayer has disconnected", e);
         } catch (Exception e) {
-           // Log.e(LOG_TAG, Thread.currentThread().getName() + "Exception!", e);
+            //Log.e(LOG_TAG, Thread.currentThread().getName() + "Exception!", e);
         } finally {
-           // Log.w(LOG_TAG, Thread.currentThread().getName() + "Stopped streaming");
+            //Log.w(LOG_TAG, Thread.currentThread().getName() + "Stopped streaming");
             streamingAllowed = true; //allow it back
 
-            //outputStream.close();
+
+            if (readBytes == -1) {
+                //Log.d(LOG_TAG, "Written full stream");
+                outputStream.close();
+            }
 
             /*realResponse.getEntity().consumeContent();
             Log.w(LOG_TAG, "Consumed content");
@@ -382,11 +337,34 @@ public class StreamProxy implements Runnable {
         }
     }
 
+    private StringBuilder getHeaders(HttpResponse response) {
+        StringBuilder httpString = new StringBuilder();
+        httpString.append(response.getStatusLine().toString());
+
+        httpString.append("\r\n"); //was httpString.append("\n");
+        for (Header h : response.getAllHeaders()) {
+            httpString.append(h.getName()).append(": ").append(h.getValue()).append("\r\n"); //was httpString.append("\n");
+        }
+        httpString.append("\r\n"); //was httpString.append("\n");
+        return httpString;
+    }
+
     public int getPort() {
         if (socket == null) {
             throw new IllegalStateException("Proxy must be started before obtaining port number");
         }
 
         return socket.getLocalPort();
+    }
+
+    public void closeQuietly(ServerSocket socket) {
+        if (socket != null) {
+            try {
+                socket.close();
+            } catch (RuntimeException rethrown) {
+                throw rethrown;
+            } catch (Exception ignored) {
+            }
+        }
     }
 }

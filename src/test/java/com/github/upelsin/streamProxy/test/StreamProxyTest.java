@@ -8,20 +8,25 @@ import com.squareup.okhttp.mockwebserver.RecordedRequest;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.Timeout;
 import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.ServerSocket;
 import java.net.URL;
+import java.util.Properties;
 import java.util.concurrent.CountDownLatch;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.hamcrest.CoreMatchers.equalTo;
+import static org.hamcrest.CoreMatchers.is;
+import static org.junit.Assert.*;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Matchers.any;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * Created by upelsin on 13.04.2015.
@@ -32,12 +37,17 @@ public class StreamProxyTest {
     public static final String MOCK_RESPONSE_BODY = "Hello";
     private StreamProxy proxy;
 
+    @Rule
+    public Timeout globalTimeout = new Timeout(4000);
+
     @Mock
-    private IOutputStreamFactory streamFactory;
+    private IOutputStreamFactory mockStreamFactory;
 
     @Before
     public void setUp() {
-        proxy = new StreamProxy(streamFactory);
+        MockitoAnnotations.initMocks(this);
+
+        proxy = new StreamProxy(mockStreamFactory);
     }
 
     @Test
@@ -92,6 +102,19 @@ public class StreamProxyTest {
         assertSuccessfulRequestFor(server.getUrl("/").toString(), MOCK_RESPONSE_BODY);
         RecordedRequest request = server.takeRequest();
         assertEquals("GET / HTTP/1.1", request.getRequestLine());
+
+        server.shutdown();
+        proxy.shutdown();
+    }
+
+    @Test
+    public void should_stop_in_timely_manner_after_serving_request() throws Exception {
+        proxy.start();
+        MockWebServer server = new MockWebServer();
+        server.enqueue(new MockResponse().setBody(MOCK_RESPONSE_BODY));
+        server.start();
+
+        assertSuccessfulRequestFor(server.getUrl("/").toString(), MOCK_RESPONSE_BODY);
 
         server.shutdown();
         proxy.shutdown();
@@ -200,9 +223,29 @@ public class StreamProxyTest {
     }
 
     @Test
-    public void should_write_response_to_output_stream() {
+    public void should_write_response_to_output_stream() throws Exception {
+        ByteArrayOutputStream outStream = spy(new ByteArrayOutputStream());
+        given(mockStreamFactory.createOutputStream(any(Properties.class))).willReturn(outStream);
 
+        proxy.start();
+        MockWebServer server = new MockWebServer();
+        server.enqueue(new MockResponse().setBody(MOCK_RESPONSE_BODY));
+        server.start();
+
+        assertSuccessfulRequestFor(server.getUrl("/").toString(), MOCK_RESPONSE_BODY);
+        RecordedRequest request = server.takeRequest();
+        assertEquals("GET / HTTP/1.1", request.getRequestLine());
+
+        verify(outStream).write(any(byte[].class), any(Integer.class), any(Integer.class));
+        byte[] bytes = outStream.toByteArray();
+        String outStreamResult = new String(bytes, "UTF8");
+
+        assertThat(outStreamResult, is(equalTo(MOCK_RESPONSE_BODY)));
+
+        server.shutdown();
+        proxy.shutdown();
     }
+
 
     private boolean isProxyListeningAt(int port) {
         ServerSocket ss = null;
