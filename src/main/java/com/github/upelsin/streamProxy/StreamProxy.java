@@ -76,9 +76,9 @@ public class StreamProxy implements Runnable {
         thread.start();
     }
 
-    public void stop() {
+    public void shutdown() {
         if (thread == null) {
-            throw new IllegalStateException("Cannot stop proxy, it has not been started");
+            throw new IllegalStateException("Cannot shutdown proxy, it has not been started");
         }
 
         //Log.w(LOG_TAG, "Stopping proxy");
@@ -87,7 +87,7 @@ public class StreamProxy implements Runnable {
 
         thread.interrupt();
         try {
-            thread.join(5000);
+            thread.join(15000);
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
@@ -109,7 +109,7 @@ public class StreamProxy implements Runnable {
         while (isRunning) {
             //Log.v(LOG_TAG, "Proxy is alive...");
             try {
-                final Socket client = socket.accept();
+                final Socket client = socket.accept(); //set socket timeout
                 if (client == null) {
                     continue;
                 }

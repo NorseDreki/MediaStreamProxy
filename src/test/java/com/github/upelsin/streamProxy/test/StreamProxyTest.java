@@ -2,14 +2,24 @@ package com.github.upelsin.streamProxy.test;
 
 import com.github.upelsin.streamProxy.IOutputStreamFactory;
 import com.github.upelsin.streamProxy.StreamProxy;
-import org.junit.After;
+import com.squareup.okhttp.mockwebserver.MockResponse;
+import com.squareup.okhttp.mockwebserver.MockWebServer;
+import com.squareup.okhttp.mockwebserver.RecordedRequest;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.mockito.Mock;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
 import java.net.ServerSocket;
+import java.net.URL;
+import java.util.concurrent.CountDownLatch;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
@@ -18,6 +28,8 @@ import static org.junit.Assert.assertTrue;
  */
 public class StreamProxyTest {
 
+    public static final int NUM_CONCURRENT_REQUESTS = 5;
+    public static final String MOCK_RESPONSE_BODY = "Hello";
     private StreamProxy proxy;
 
     @Mock
@@ -29,23 +41,23 @@ public class StreamProxyTest {
     }
 
     @Test
-    public void should_start_proxy() {
+    public void should_start() {
         proxy.start();
         assertTrue(isProxyListeningAt(proxy.getPort()));
     }
 
     @Test
-    public void should_start_then_stop_proxy() {
+    public void should_start_then_stop() {
         proxy.start();
         int port = proxy.getPort();
 
-        proxy.stop();
+        proxy.shutdown();
         assertFalse(isProxyListeningAt(port));
     }
 
     @Test(expected = IllegalStateException.class)
-    public void should_throw_when_stopping_proxy_before_starting() {
-        proxy.stop();
+    public void should_throw_when_stopping_before_starting() {
+        proxy.shutdown();
     }
 
     @Test(expected = IllegalStateException.class)
@@ -59,15 +71,137 @@ public class StreamProxyTest {
     }
 
     @Test
-    public void should_start_stop_several_times_in_a_row() {
-        for (int i = 0; i < 5; i++) {
+    public void should_start_and_stop_several_times_in_a_row() {
+        for (int i = 0; i < NUM_CONCURRENT_REQUESTS; i++) {
             proxy.start();
             int port = proxy.getPort();
             assertTrue(isProxyListeningAt(port));
 
-            proxy.stop();
+            proxy.shutdown();
             assertFalse(isProxyListeningAt(port));
         }
+    }
+
+    @Test
+    public void should_serve_request() throws Exception {
+        proxy.start();
+        MockWebServer server = new MockWebServer();
+        server.enqueue(new MockResponse().setBody(MOCK_RESPONSE_BODY));
+        server.start();
+
+        assertSuccessfulRequestFor(server.getUrl("/").toString(), MOCK_RESPONSE_BODY);
+        RecordedRequest request = server.takeRequest();
+        assertEquals("GET / HTTP/1.1", request.getRequestLine());
+
+        server.shutdown();
+        proxy.shutdown();
+    }
+
+    private void assertSuccessfulRequestFor(String serverUrl, String body) {
+        String proxiedUrl = String.format("http://127.0.0.1:%d/%s", proxy.getPort(), serverUrl);
+
+        try {
+            URL url = new URL(proxiedUrl);
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            InputStream in = connection.getInputStream();
+            BufferedReader reader = new BufferedReader(new InputStreamReader(in));
+
+            assertEquals(HttpURLConnection.HTTP_OK, connection.getResponseCode());
+            assertEquals(body, reader.readLine());
+
+        } catch (IOException e) {
+            throw new RuntimeException("Unable to execute request for " + proxiedUrl, e);
+        }
+    }
+
+    @Test
+    public void should_propagate_request_headers() throws Exception {
+        proxy.start();
+        MockWebServer server = new MockWebServer();
+        server.enqueue(new MockResponse().setBody(MOCK_RESPONSE_BODY));
+        server.start();
+
+        String serverUrl = server.getUrl("/").toString();
+        String proxiedUrl = String.format("http://127.0.0.1:%d/%s", proxy.getPort(), serverUrl);
+
+        URL url = new URL(proxiedUrl);
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        //TODO properly emulate request and response
+        connection.setRequestProperty("Content-Type", "audio/mpeg");
+        connection.setRequestProperty("Accept-Ranges", "bytes");
+        connection.setRequestProperty("Content-Length", "4");
+        connection.setRequestProperty("Content-Range", "bytes 0-3/4");
+        connection.setRequestProperty("Status", "206");
+
+        InputStream in = connection.getInputStream();
+        BufferedReader reader = new BufferedReader(new InputStreamReader(in));
+
+        assertEquals(HttpURLConnection.HTTP_OK, connection.getResponseCode());
+        assertEquals(MOCK_RESPONSE_BODY, reader.readLine());
+
+        RecordedRequest request = server.takeRequest();
+        assertEquals("GET / HTTP/1.1", request.getRequestLine());
+        assertEquals("bytes", request.getHeader("Accept-Ranges"));
+        assertEquals("bytes 0-3/4", request.getHeader("Content-Range"));
+
+        server.shutdown();
+        proxy.shutdown();
+    }
+
+    @Test
+    public void should_serve_concurrent_requests() throws Exception {
+        final CountDownLatch startLatch = new CountDownLatch(1);
+        final CountDownLatch finishLatch = new CountDownLatch(NUM_CONCURRENT_REQUESTS);
+        MockWebServer server = new MockWebServer();
+
+        for (int i = 0; i < NUM_CONCURRENT_REQUESTS; i++) {
+            server.enqueue(new MockResponse().setBody(MOCK_RESPONSE_BODY));
+        }
+
+        proxy.start();
+        server.start();
+        final String serverUrl = server.getUrl("/").toString();
+
+        for (int i = 0; i < NUM_CONCURRENT_REQUESTS; i++) {
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    await(startLatch);
+                    assertSuccessfulRequestFor(serverUrl, MOCK_RESPONSE_BODY);
+                    finishLatch.countDown();
+                }
+            }).start();
+        }
+        startLatch.countDown();
+        await(finishLatch);
+
+        for (int i = 0; i < NUM_CONCURRENT_REQUESTS; i++) {
+            RecordedRequest request = server.takeRequest();
+            assertEquals("GET / HTTP/1.1", request.getRequestLine());
+        }
+
+        server.shutdown();
+        proxy.shutdown();
+    }
+
+    @Test
+    public void should_signal_success_to_output_stream() {
+
+    }
+
+    @Test
+    public void should_signal_failure_to_output_stream() {
+
+    }
+
+    @Test
+    public void should_pass_query_parameters() {
+
+    }
+
+    @Test
+    public void should_write_response_to_output_stream() {
+
     }
 
     private boolean isProxyListeningAt(int port) {
@@ -89,5 +223,13 @@ public class StreamProxyTest {
         }
 
         return true;
+    }
+
+    private void await(CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 }
