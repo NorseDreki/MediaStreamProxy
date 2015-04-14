@@ -1,5 +1,13 @@
 package com.github.upelsin.streamProxy;
 
+import com.squareup.okhttp.Headers;
+import com.squareup.okhttp.OkHttpClient;
+import com.squareup.okhttp.Request;
+import com.squareup.okhttp.Response;
+import okio.Buffer;
+import okio.BufferedSink;
+import okio.BufferedSource;
+import okio.Okio;
 import org.apache.http.Header;
 import org.apache.http.HttpRequest;
 import org.apache.http.HttpResponse;
@@ -17,10 +25,7 @@ import org.apache.http.message.BasicHttpResponse;
 import java.io.*;
 import java.net.*;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -41,6 +46,7 @@ public class StreamProxy implements Runnable {
     private IOutputStreamFactory streamFactory;
 
     private Set<Socket> clientSockets = Collections.newSetFromMap(new ConcurrentHashMap<Socket, Boolean>());
+    private OkHttpClient client;
 
     public StreamProxy(IOutputStreamFactory streamFactory) {
         this.streamFactory = streamFactory;
@@ -52,6 +58,8 @@ public class StreamProxy implements Runnable {
         } catch (IOException e) {
             throw new ProxyNotStartedException(e);
         }
+
+        client = new OkHttpClient();
 
         ExceptionHandlingThreadFactory threadFactory =
                 new ExceptionHandlingThreadFactory(new LoggingExceptionHandler(logger));
@@ -144,6 +152,70 @@ public class StreamProxy implements Runnable {
         addHeaders(request, headers);
 
         return request;
+    }
+
+    private Object readFrom(Socket clientSocket) throws IOException {
+        BufferedSource source = Okio.buffer(Okio.source(clientSocket));
+        //String requestLine = source.readUtf8LineStrict();
+
+        String requestLine;
+        try {
+            requestLine = source.readUtf8LineStrict();
+        } catch (IOException streamIsClosed) {
+            return null; // no request because we closed the stream
+        }
+        if (requestLine.length() == 0) {
+            return null; // no request because the stream is exhausted
+        }
+
+        Headers.Builder headers = new Headers.Builder();
+        String header;
+        while ((header = source.readUtf8LineStrict()).length() != 0) {
+            headers.add(header);
+        }
+
+        StringTokenizer st = new StringTokenizer(requestLine);
+        String method = st.nextToken();
+        String uri = st.nextToken();
+        String realUri = uri.substring(1);
+
+
+        Request request1 = new Request.Builder()
+                .url(realUri)
+                .headers(headers.build())
+                .build();
+
+        Response response = client.newCall(request1).execute();
+        if (!response.isSuccessful()) throw new IOException("Unexpected code " + response);
+
+        writeHttpResponse(clientSocket, response);
+
+        return null;
+    }
+
+    private void writeHttpResponse(Socket clientSocket, Response response)
+            throws IOException {
+
+        BufferedSink sink = Okio.buffer(Okio.sink(clientSocket));
+
+
+        sink.writeUtf8(response.message());
+        sink.writeUtf8("\r\n");
+
+        Headers headers = response.headers();
+        for (int i = 0, size = headers.size(); i < size; i++) {
+            sink.writeUtf8(headers.name(i));
+            sink.writeUtf8(": ");
+            sink.writeUtf8(headers.value(i));
+            sink.writeUtf8("\r\n");
+        }
+        sink.writeUtf8("\r\n");
+        sink.flush();
+
+        BufferedSource source = response.body().source();
+        sink.writeAll(source);
+        sink.flush();
+
     }
 
     private void addHeaders(HttpRequest request, Map<String, String> headers) {
