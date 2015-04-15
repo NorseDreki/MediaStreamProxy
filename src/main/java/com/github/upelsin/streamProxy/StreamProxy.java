@@ -4,26 +4,19 @@ import com.squareup.okhttp.Headers;
 import com.squareup.okhttp.OkHttpClient;
 import com.squareup.okhttp.Request;
 import com.squareup.okhttp.Response;
-import okio.*;
-import org.apache.http.Header;
-import org.apache.http.HttpRequest;
-import org.apache.http.HttpResponse;
-import org.apache.http.StatusLine;
-import org.apache.http.client.ClientProtocolException;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.conn.scheme.PlainSocketFactory;
-import org.apache.http.conn.scheme.Scheme;
-import org.apache.http.conn.scheme.SchemeRegistry;
-import org.apache.http.impl.client.DefaultHttpClient;
-import org.apache.http.impl.conn.SingleClientConnManager;
-import org.apache.http.message.BasicHttpRequest;
-import org.apache.http.message.BasicHttpResponse;
+import okio.BufferedSink;
+import okio.BufferedSource;
+import okio.Okio;
 
-import java.io.*;
-import java.net.*;
-import java.nio.charset.Charset;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -35,9 +28,6 @@ public class StreamProxy implements Runnable {
     private ServerSocket serverSocket;
 
     private Thread serverThread;
-
-    private volatile boolean streamingAllowed = true;
-    private volatile boolean isRunning = true;
 
     private ExecutorService executor;
 
@@ -73,8 +63,6 @@ public class StreamProxy implements Runnable {
             throw new IllegalStateException("Cannot shutdown proxy, it has not been started");
         }
 
-        isRunning = false; //TODO remove
-
         executor.shutdownNow();
 
         while (clientSockets.iterator().hasNext()) {
@@ -106,13 +94,6 @@ public class StreamProxy implements Runnable {
                         } catch (IOException e) {
                             throw new RuntimeException(e);
                         }
-
-                        /*HttpRequest request = readRequest(clientSocket);
-                        try {
-                            processRequest(request, clientSocket);
-                        } catch (IOException e) {
-                            e.printStackTrace();
-                        }*/
                     }
                 });
 
@@ -120,42 +101,6 @@ public class StreamProxy implements Runnable {
                 logger.log(Level.WARNING, "Exception while processing connection from client", e);
             }
         }
-    }
-
-    private HttpRequest readRequest(Socket client) {
-        HttpRequest request = null;
-        InputStream is;
-        String firstLine = "";
-        Map<String, String> headers;
-        try {
-            is = client.getInputStream();
-            BufferedReader reader = new BufferedReader(new InputStreamReader(is), 8192); //header should fit in 8K
-            firstLine = reader.readLine();
-
-            headers = readHeaders(reader);
-
-
-        } catch (IOException e) {
-            //Log.e(LOG_TAG, "Error parsing request", e);
-            return request;
-        }
-
-        if (firstLine == null) {
-            //Log.i(LOG_TAG, "Proxy client closed connection without a request.");
-            return request;
-        }
-
-        StringTokenizer st = new StringTokenizer(firstLine);
-        String method = st.nextToken();
-        String uri = st.nextToken();
-        String realUri = uri.substring(1);
-
-        //Log.d(LOG_TAG, "Client requested: " + realUri);
-        request = new BasicHttpRequest(method, realUri);
-
-        addHeaders(request, headers);
-
-        return request;
     }
 
     private Object readFrom(Socket clientSocket) throws IOException {
@@ -193,7 +138,6 @@ public class StreamProxy implements Runnable {
         if (!response.isSuccessful()) throw new IOException("Unexpected code " + response);
 
         writeHttpResponse(clientSocket, response);
-        //processRequest2(response, clientSocket);
 
         return null;
     }
@@ -217,268 +161,26 @@ public class StreamProxy implements Runnable {
         sink.flush();
 
         BufferedSource source = response.body().source();
-        String s = source.readString(Charset.forName("UTF-8"));
-        sink.write(s.getBytes());
-        sink.flush();
+
+        OutputStream fork = streamFactory.createOutputStream(new Properties());
+
+        byte[] buffer = new byte[65536];
+        while (!Thread.currentThread().isInterrupted()) {
+            int read = source.read(buffer);
+            if (read == -1) {
+                break;
+            }
+
+            sink.write(buffer, 0, read);
+            sink.flush();
+
+            fork.write(buffer, 0, read);
+            fork.flush();
+        }
 
         source.close();
         sink.close();
-
-    }
-
-    private StringBuilder getHeaders2(Response response) {
-        StringBuilder httpString = new StringBuilder();
-        httpString.append("http/1.1 200 OK\r\nContent-Length: 5\r\n\r\n");
-
-
-        /*String statusLine = String.format("%s %d %s\r\n", response.protocol().toString(), response.code(), response.message());
-        httpString.append(statusLine);
-
-        Headers headers = response.headers();
-        for (int i = 0, size = headers.size(); i < size; i++) {
-            httpString.append(headers.name(i));
-            httpString.append(": ");
-            httpString.append(headers.value(i));
-            httpString.append("\r\n");
-        }
-        httpString.append("\r\n");*/
-
-        return httpString;
-    }
-
-    private void processRequest2(Response response, Socket client)
-            throws IllegalStateException, IOException {
-
-        //Uri parsed = Uri.parse(url);
-
-        Properties props = new Properties();
-        /*props.setProperty("artist", parsed.getQueryParameter("artist"));
-        props.setProperty("track", parsed.getQueryParameter("track"));*/
-
-        OutputStream outputStream = streamFactory.createOutputStream(props);
-
-        InputStream data = response.body().byteStream();//realResponse.getEntity().getContent();
-
-        //Log.d(LOG_TAG, "Reading headers");
-        StringBuilder httpString = getHeaders2(response);
-        //Log.d(LOG_TAG, "Copying headers done");
-
-        int slicer = 0;
-        int readBytes = 0;
-        try {
-            //Log.d(LOG_TAG, Thread.currentThread().getName() + "Writing to client...");
-            byte[] buffer = httpString.toString().getBytes();
-            client.getOutputStream().write(buffer, 0, buffer.length);
-            byte[] buff = new byte[1024 * 64];
-
-            while (isRunning
-/*                    && streamingAllowed
-                    && !Thread.currentThread().isInterrupted()*/
-                    && (readBytes /*= data.read(buff, 0, buff.length)*/) != -1) {
-
-                if (slicer % 25 == 0)
-                    //Log.d("WWWW", Thread.currentThread().getName() + "Reading bytes...");
-
-                    readBytes = data.read(buff, 0, buff.length);
-                if (readBytes == -1) {
-                    break;
-                }
-
-                if (slicer % 25 == 0)
-                    //Log.d("WWWW", Thread.currentThread().getName() + "Read bytes: " + readBytes);
-
-                    client.getOutputStream().write(buff, 0, readBytes);
-                if (slicer % 25 == 0)
-                    //Log.d("WWWW", Thread.currentThread().getName() + "Written bytes: " + readBytes);
-
-                    slicer++;
-
-                outputStream.write(buff, 0, readBytes);
-
-                if (!streamingAllowed || Thread.currentThread().isInterrupted()) {
-                    break;
-                }
-
-            }
-        } catch (SocketException e) {
-            //Log.w(LOG_TAG, Thread.currentThread().getName() + "Looks like MediaPlayer has disconnected", e);
-        } catch (Exception e) {
-            //Log.e(LOG_TAG, Thread.currentThread().getName() + "Exception!", e);
-        } finally {
-            //Log.w(LOG_TAG, Thread.currentThread().getName() + "Stopped streaming");
-            streamingAllowed = true; //allow it back
-
-
-            if (readBytes == -1) {
-                //Log.d(LOG_TAG, "Written full stream");
-                outputStream.close();
-            }
-
-            /*realResponse.getEntity().consumeContent();
-            Log.w(LOG_TAG, "Consumed content");
-
-			if (data != null) {
-				data.close();
-                Log.w(LOG_TAG, "Closed input stream");
-			}*/
-            client.getOutputStream().flush();
-            client.getOutputStream().close();
-
-
-            //client.close();
-            //Log.w(LOG_TAG, "Closed client");
-        }
-    }
-
-    private void addHeaders(HttpRequest request, Map<String, String> headers) {
-        for (Map.Entry<String, String> entry : headers.entrySet()) {
-            request.addHeader(entry.getKey(), entry.getValue());
-        }
-    }
-
-    private Map<String, String> readHeaders(BufferedReader reader) throws IOException {
-        Map<String, String> result = new HashMap<String, String>();
-        String inputLine;
-
-        while (!(inputLine = reader.readLine()).equals("")) {
-            //Log.i(LOG_TAG, "ZZZZ" + inputLine);
-            result.put(inputLine.split(": ")[0],
-                    inputLine.split(": ")[1]);
-        }
-
-        return result;
-    }
-
-    private HttpResponse download(String url, HttpRequest request) {
-        DefaultHttpClient seed = new DefaultHttpClient();
-        SchemeRegistry registry = new SchemeRegistry();
-        registry.register(new Scheme("http", PlainSocketFactory.getSocketFactory(), 80));
-        SingleClientConnManager mgr = new SingleClientConnManager(seed.getParams(), registry);
-        DefaultHttpClient http = new DefaultHttpClient(mgr, seed.getParams());
-        HttpGet method = new HttpGet(url);
-
-        Header[] allHeaders = request.getAllHeaders();
-        method.setHeaders(allHeaders);
-
-        HttpResponse response = null;
-        try {
-            //Log.d(LOG_TAG, "Executing real request...");
-            response = http.execute(method);
-            //Log.d(LOG_TAG, "Executed");
-        } catch (ClientProtocolException e) {
-            //Log.e(LOG_TAG, "Error executing", e);
-        } catch (IOException e) {
-            //Log.e(LOG_TAG, "Error executing", e);
-        }
-        return response;
-    }
-
-    private void processRequest(HttpRequest request, Socket client)
-            throws IllegalStateException, IOException {
-        if (request == null) {
-            return;
-        }
-        //Log.d(LOG_TAG, "Processing");
-        String url = request.getRequestLine().getUri();
-        HttpResponse realResponse = download(url, request);
-        if (realResponse == null) {
-            return;
-        }
-
-        //Uri parsed = Uri.parse(url);
-
-        Properties props = new Properties();
-        /*props.setProperty("artist", parsed.getQueryParameter("artist"));
-        props.setProperty("track", parsed.getQueryParameter("track"));*/
-
-        OutputStream outputStream = streamFactory.createOutputStream(props);
-
-        InputStream data = realResponse.getEntity().getContent();
-        StatusLine line = realResponse.getStatusLine();
-        HttpResponse response = new BasicHttpResponse(line);
-        response.setHeaders(realResponse.getAllHeaders());
-
-        //Log.d(LOG_TAG, "Reading headers");
-        StringBuilder httpString = getHeaders(response);
-        //Log.d(LOG_TAG, "Copying headers done");
-
-        int slicer = 0;
-        int readBytes = 0;
-        try {
-            //Log.d(LOG_TAG, Thread.currentThread().getName() + "Writing to client...");
-            byte[] buffer = httpString.toString().getBytes();
-            client.getOutputStream().write(buffer, 0, buffer.length);
-            byte[] buff = new byte[1024 * 64];
-
-            while (isRunning
-/*                    && streamingAllowed
-                    && !Thread.currentThread().isInterrupted()*/
-                    && (readBytes /*= data.read(buff, 0, buff.length)*/) != -1) {
-
-                if (slicer % 25 == 0)
-                    //Log.d("WWWW", Thread.currentThread().getName() + "Reading bytes...");
-
-                    readBytes = data.read(buff, 0, buff.length);
-                if (readBytes == -1) {
-                    break;
-                }
-
-                if (slicer % 25 == 0)
-                    //Log.d("WWWW", Thread.currentThread().getName() + "Read bytes: " + readBytes);
-
-                    client.getOutputStream().write(buff, 0, readBytes);
-                if (slicer % 25 == 0)
-                    //Log.d("WWWW", Thread.currentThread().getName() + "Written bytes: " + readBytes);
-
-                    slicer++;
-
-                outputStream.write(buff, 0, readBytes);
-
-                if (!streamingAllowed || Thread.currentThread().isInterrupted()) {
-                    break;
-                }
-
-            }
-        } catch (SocketException e) {
-            //Log.w(LOG_TAG, Thread.currentThread().getName() + "Looks like MediaPlayer has disconnected", e);
-        } catch (Exception e) {
-            //Log.e(LOG_TAG, Thread.currentThread().getName() + "Exception!", e);
-        } finally {
-            //Log.w(LOG_TAG, Thread.currentThread().getName() + "Stopped streaming");
-            streamingAllowed = true; //allow it back
-
-
-            if (readBytes == -1) {
-                //Log.d(LOG_TAG, "Written full stream");
-                outputStream.close();
-            }
-
-            /*realResponse.getEntity().consumeContent();
-            Log.w(LOG_TAG, "Consumed content");
-
-			if (data != null) {
-				data.close();
-                Log.w(LOG_TAG, "Closed input stream");
-			}*/
-            client.getOutputStream().flush();
-            client.getOutputStream().close();
-
-
-            //client.close();
-            //Log.w(LOG_TAG, "Closed client");
-        }
-    }
-
-    private StringBuilder getHeaders(HttpResponse response) {
-        StringBuilder httpString = new StringBuilder();
-        httpString.append(response.getStatusLine().toString());
-
-        httpString.append("\r\n"); //was httpString.append("\n");
-        for (Header h : response.getAllHeaders()) {
-            httpString.append(h.getName()).append(": ").append(h.getValue()).append("\r\n"); //was httpString.append("\n");
-        }
-        httpString.append("\r\n"); //was httpString.append("\n");
-        return httpString;
+        fork.close();
     }
 
     public int getPort() {

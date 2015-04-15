@@ -6,9 +6,7 @@ import com.squareup.okhttp.mockwebserver.MockResponse;
 import com.squareup.okhttp.mockwebserver.MockWebServer;
 import com.squareup.okhttp.mockwebserver.RecordedRequest;
 import org.junit.Before;
-import org.junit.Rule;
 import org.junit.Test;
-import org.junit.rules.Timeout;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -24,9 +22,6 @@ import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.*;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Matchers.any;
-import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * Created by upelsin on 13.04.2015.
@@ -37,8 +32,8 @@ public class StreamProxyTest {
     public static final String MOCK_RESPONSE_BODY = "Hello";
     private StreamProxy proxy;
 
-    @Rule
-    public Timeout globalTimeout = new Timeout(4000);
+/*    @Rule
+    public Timeout globalTimeout = new Timeout(4000);*/
 
     @Mock
     private IOutputStreamFactory mockStreamFactory;
@@ -177,6 +172,9 @@ public class StreamProxyTest {
         final CountDownLatch finishLatch = new CountDownLatch(NUM_CONCURRENT_REQUESTS);
         MockWebServer server = new MockWebServer();
 
+        ByteArrayOutputStream outStream = new ByteArrayOutputStream();
+        given(mockStreamFactory.createOutputStream(any(Properties.class))).willReturn(outStream);
+
         for (int i = 0; i < NUM_CONCURRENT_REQUESTS; i++) {
             server.enqueue(new MockResponse().setBody(MOCK_RESPONSE_BODY));
         }
@@ -224,7 +222,7 @@ public class StreamProxyTest {
 
     @Test
     public void should_write_response_to_output_stream() throws Exception {
-        ByteArrayOutputStream outStream = spy(new ByteArrayOutputStream());
+        ByteArrayOutputStream outStream = new ByteArrayOutputStream();
         given(mockStreamFactory.createOutputStream(any(Properties.class))).willReturn(outStream);
 
         proxy.start();
@@ -236,7 +234,7 @@ public class StreamProxyTest {
         RecordedRequest request = server.takeRequest();
         assertEquals("GET / HTTP/1.1", request.getRequestLine());
 
-        verify(outStream).write(any(byte[].class), any(Integer.class), any(Integer.class));
+        //verify(outStream).write(any(byte[].class), any(Integer.class), any(Integer.class));
         byte[] bytes = outStream.toByteArray();
         String outStreamResult = new String(bytes, "UTF8");
 
