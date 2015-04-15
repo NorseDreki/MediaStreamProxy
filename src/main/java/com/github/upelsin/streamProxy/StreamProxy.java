@@ -192,8 +192,8 @@ public class StreamProxy implements Runnable {
         Response response = client.newCall(request1).execute();
         if (!response.isSuccessful()) throw new IOException("Unexpected code " + response);
 
-        //writeHttpResponse(clientSocket, response);
-        processRequest2(response, clientSocket);
+        writeHttpResponse(clientSocket, response);
+        //processRequest2(response, clientSocket);
 
         return null;
     }
@@ -203,9 +203,8 @@ public class StreamProxy implements Runnable {
 
         BufferedSink sink = Okio.buffer(Okio.sink(clientSocket));
 
-        String statusLine = String.format("%s %d %s", response.protocol().toString(), response.code(), response.message());
+        String statusLine = String.format("%s %d %s\r\n", response.protocol().toString().toUpperCase(Locale.US), response.code(), response.message());
         sink.writeUtf8(statusLine);
-        sink.writeUtf8("\r\n");
 
         Headers headers = response.headers();
         for (int i = 0, size = headers.size(); i < size; i++) {
@@ -229,7 +228,7 @@ public class StreamProxy implements Runnable {
 
     private StringBuilder getHeaders2(Response response) {
         StringBuilder httpString = new StringBuilder();
-        httpString.append("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n");
+        httpString.append("http/1.1 200 OK\r\nContent-Length: 5\r\n\r\n");
 
 
         /*String statusLine = String.format("%s %d %s\r\n", response.protocol().toString(), response.code(), response.message());
