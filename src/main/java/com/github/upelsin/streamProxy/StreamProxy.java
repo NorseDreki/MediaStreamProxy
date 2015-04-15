@@ -4,10 +4,7 @@ import com.squareup.okhttp.Headers;
 import com.squareup.okhttp.OkHttpClient;
 import com.squareup.okhttp.Request;
 import com.squareup.okhttp.Response;
-import okio.Buffer;
-import okio.BufferedSink;
-import okio.BufferedSource;
-import okio.Okio;
+import okio.*;
 import org.apache.http.Header;
 import org.apache.http.HttpRequest;
 import org.apache.http.HttpResponse;
@@ -24,6 +21,7 @@ import org.apache.http.message.BasicHttpResponse;
 
 import java.io.*;
 import java.net.*;
+import java.nio.charset.Charset;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.logging.Level;
@@ -103,12 +101,18 @@ public class StreamProxy implements Runnable {
                 executor.execute(new Runnable() {
                     @Override
                     public void run() {
-                        HttpRequest request = readRequest(clientSocket);
+                        try {
+                            readFrom(clientSocket);
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+
+                        /*HttpRequest request = readRequest(clientSocket);
                         try {
                             processRequest(request, clientSocket);
                         } catch (IOException e) {
                             e.printStackTrace();
-                        }
+                        }*/
                     }
                 });
 
@@ -188,7 +192,8 @@ public class StreamProxy implements Runnable {
         Response response = client.newCall(request1).execute();
         if (!response.isSuccessful()) throw new IOException("Unexpected code " + response);
 
-        writeHttpResponse(clientSocket, response);
+        //writeHttpResponse(clientSocket, response);
+        processRequest2(response, clientSocket);
 
         return null;
     }
@@ -198,8 +203,8 @@ public class StreamProxy implements Runnable {
 
         BufferedSink sink = Okio.buffer(Okio.sink(clientSocket));
 
-
-        sink.writeUtf8(response.message());
+        String statusLine = String.format("%s %d %s", response.protocol().toString(), response.code(), response.message());
+        sink.writeUtf8(statusLine);
         sink.writeUtf8("\r\n");
 
         Headers headers = response.headers();
@@ -213,9 +218,117 @@ public class StreamProxy implements Runnable {
         sink.flush();
 
         BufferedSource source = response.body().source();
-        sink.writeAll(source);
+        String s = source.readString(Charset.forName("UTF-8"));
+        sink.write(s.getBytes());
         sink.flush();
 
+        source.close();
+        sink.close();
+
+    }
+
+    private StringBuilder getHeaders2(Response response) {
+        StringBuilder httpString = new StringBuilder();
+        httpString.append("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n");
+
+
+        /*String statusLine = String.format("%s %d %s\r\n", response.protocol().toString(), response.code(), response.message());
+        httpString.append(statusLine);
+
+        Headers headers = response.headers();
+        for (int i = 0, size = headers.size(); i < size; i++) {
+            httpString.append(headers.name(i));
+            httpString.append(": ");
+            httpString.append(headers.value(i));
+            httpString.append("\r\n");
+        }
+        httpString.append("\r\n");*/
+
+        return httpString;
+    }
+
+    private void processRequest2(Response response, Socket client)
+            throws IllegalStateException, IOException {
+
+        //Uri parsed = Uri.parse(url);
+
+        Properties props = new Properties();
+        /*props.setProperty("artist", parsed.getQueryParameter("artist"));
+        props.setProperty("track", parsed.getQueryParameter("track"));*/
+
+        OutputStream outputStream = streamFactory.createOutputStream(props);
+
+        InputStream data = response.body().byteStream();//realResponse.getEntity().getContent();
+
+        //Log.d(LOG_TAG, "Reading headers");
+        StringBuilder httpString = getHeaders2(response);
+        //Log.d(LOG_TAG, "Copying headers done");
+
+        int slicer = 0;
+        int readBytes = 0;
+        try {
+            //Log.d(LOG_TAG, Thread.currentThread().getName() + "Writing to client...");
+            byte[] buffer = httpString.toString().getBytes();
+            client.getOutputStream().write(buffer, 0, buffer.length);
+            byte[] buff = new byte[1024 * 64];
+
+            while (isRunning
+/*                    && streamingAllowed
+                    && !Thread.currentThread().isInterrupted()*/
+                    && (readBytes /*= data.read(buff, 0, buff.length)*/) != -1) {
+
+                if (slicer % 25 == 0)
+                    //Log.d("WWWW", Thread.currentThread().getName() + "Reading bytes...");
+
+                    readBytes = data.read(buff, 0, buff.length);
+                if (readBytes == -1) {
+                    break;
+                }
+
+                if (slicer % 25 == 0)
+                    //Log.d("WWWW", Thread.currentThread().getName() + "Read bytes: " + readBytes);
+
+                    client.getOutputStream().write(buff, 0, readBytes);
+                if (slicer % 25 == 0)
+                    //Log.d("WWWW", Thread.currentThread().getName() + "Written bytes: " + readBytes);
+
+                    slicer++;
+
+                outputStream.write(buff, 0, readBytes);
+
+                if (!streamingAllowed || Thread.currentThread().isInterrupted()) {
+                    break;
+                }
+
+            }
+        } catch (SocketException e) {
+            //Log.w(LOG_TAG, Thread.currentThread().getName() + "Looks like MediaPlayer has disconnected", e);
+        } catch (Exception e) {
+            //Log.e(LOG_TAG, Thread.currentThread().getName() + "Exception!", e);
+        } finally {
+            //Log.w(LOG_TAG, Thread.currentThread().getName() + "Stopped streaming");
+            streamingAllowed = true; //allow it back
+
+
+            if (readBytes == -1) {
+                //Log.d(LOG_TAG, "Written full stream");
+                outputStream.close();
+            }
+
+            /*realResponse.getEntity().consumeContent();
+            Log.w(LOG_TAG, "Consumed content");
+
+			if (data != null) {
+				data.close();
+                Log.w(LOG_TAG, "Closed input stream");
+			}*/
+            client.getOutputStream().flush();
+            client.getOutputStream().close();
+
+
+            //client.close();
+            //Log.w(LOG_TAG, "Closed client");
+        }
     }
 
     private void addHeaders(HttpRequest request, Map<String, String> headers) {
