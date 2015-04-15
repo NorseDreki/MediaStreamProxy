@@ -89,67 +89,103 @@ public class StreamProxy implements Runnable {
                 executor.execute(new Runnable() {
                     @Override
                     public void run() {
-                        try {
-                            readFrom(clientSocket);
-                        } catch (IOException e) {
-                            throw new RuntimeException(e);
-                        }
+                        serveClientRequest(clientSocket);
                     }
                 });
 
+            } catch (RuntimeException e) { // protect while(){} from any runtime exception
+                Thread t = Thread.currentThread();
+                t.getUncaughtExceptionHandler().uncaughtException(t, e);
+
             } catch (IOException e) {
-                logger.log(Level.WARNING, "Exception while processing connection from client", e);
+                logger.log(Level.WARNING, "Exception while accepting connection from client", e);
             }
         }
     }
 
-    private Object readFrom(Socket clientSocket) throws IOException {
-        BufferedSource source = Okio.buffer(Okio.source(clientSocket));
-        //String requestLine = source.readUtf8LineStrict();
-
-        String requestLine;
+    private void serveClientRequest(Socket clientSocket) {
         try {
-            requestLine = source.readUtf8LineStrict();
-        } catch (IOException streamIsClosed) {
-            return null; // no request because we closed the stream
-        }
-        if (requestLine.length() == 0) {
-            return null; // no request because the stream is exhausted
-        }
+            BufferedSource source = Okio.buffer(Okio.source(clientSocket));
 
+            String requestLine = source.readUtf8LineStrict();
+            StringTokenizer st = new StringTokenizer(requestLine);
+            String method = st.nextToken();
+            String uri = st.nextToken();
+            String realUri = uri.substring(1);
+
+
+            Headers.Builder headers = buildHeaders(source);
+            Request request = new Request.Builder()
+                    .url(realUri)
+                    .headers(headers.build())
+                    .build();
+            Response response = client.newCall(request).execute();
+
+            if (Thread.currentThread().isInterrupted()) {
+                return;
+            }
+
+            OutputStream fork = streamFactory.createOutputStream(new Properties());
+            try {
+                writeResponse(clientSocket, response, fork);
+            } catch (IOException e) {
+                //fork.abort();
+                throw e;
+            } finally {
+                if (Thread.currentThread().isInterrupted()) {
+                    // might be called twice, but that's fine
+                    //fork.abort();
+                }
+            }
+
+        } catch (IOException e) {
+            logger.log(Level.WARNING, "Exception while serving client request", e);
+        }
+    }
+
+    private Headers.Builder buildHeaders(BufferedSource source) throws IOException {
         Headers.Builder headers = new Headers.Builder();
         String header;
         while ((header = source.readUtf8LineStrict()).length() != 0) {
             headers.add(header);
         }
-
-        StringTokenizer st = new StringTokenizer(requestLine);
-        String method = st.nextToken();
-        String uri = st.nextToken();
-        String realUri = uri.substring(1);
-
-
-        Request request1 = new Request.Builder()
-                .url(realUri)
-                .headers(headers.build())
-                .build();
-
-        Response response = client.newCall(request1).execute();
-        if (!response.isSuccessful()) throw new IOException("Unexpected code " + response);
-
-        writeHttpResponse(clientSocket, response);
-
-        return null;
+        return headers;
     }
 
-    private void writeHttpResponse(Socket clientSocket, Response response)
+    private void writeResponse(Socket clientSocket, Response response, OutputStream fork)
             throws IOException {
 
         BufferedSink sink = Okio.buffer(Okio.sink(clientSocket));
+        BufferedSource source = response.body().source();
 
-        String statusLine = String.format("%s %d %s\r\n", response.protocol().toString().toUpperCase(Locale.US), response.code(), response.message());
-        sink.writeUtf8(statusLine);
+        try {
+            writeStatusLine(response, sink);
+            writeHeaders(response, sink);
+            sink.flush();
 
+            byte[] buffer = new byte[16384];
+            while (!Thread.currentThread().isInterrupted()) {
+                int read = source.read(buffer);
+                if (read == -1) {
+                    break;
+                }
+
+                sink.write(buffer, 0, read);
+                sink.flush();
+
+                fork.write(buffer, 0, read);
+                fork.flush();
+            }
+
+        } finally {
+            //TODO close quietly
+            source.close();
+            sink.close();
+            fork.close();
+        }
+    }
+
+    private void writeHeaders(Response response, BufferedSink sink) throws IOException {
         Headers headers = response.headers();
         for (int i = 0, size = headers.size(); i < size; i++) {
             sink.writeUtf8(headers.name(i));
@@ -158,29 +194,12 @@ public class StreamProxy implements Runnable {
             sink.writeUtf8("\r\n");
         }
         sink.writeUtf8("\r\n");
-        sink.flush();
+    }
 
-        BufferedSource source = response.body().source();
-
-        OutputStream fork = streamFactory.createOutputStream(new Properties());
-
-        byte[] buffer = new byte[65536];
-        while (!Thread.currentThread().isInterrupted()) {
-            int read = source.read(buffer);
-            if (read == -1) {
-                break;
-            }
-
-            sink.write(buffer, 0, read);
-            sink.flush();
-
-            fork.write(buffer, 0, read);
-            fork.flush();
-        }
-
-        source.close();
-        sink.close();
-        fork.close();
+    private void writeStatusLine(Response response, BufferedSink sink) throws IOException {
+        String protocol = response.protocol().toString().toUpperCase(Locale.US);
+        String statusLine = String.format("%s %d %s\r\n", protocol, response.code(), response.message());
+        sink.writeUtf8(statusLine);
     }
 
     public int getPort() {
