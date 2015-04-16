@@ -8,5 +8,5 @@ import java.util.Properties;
  */
 public interface IOutputStreamFactory {
 
-    OutputStream createOutputStream(Properties props);
+    SideStream createOutputStream(Properties props);
 }

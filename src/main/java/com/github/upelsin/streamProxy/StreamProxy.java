@@ -7,9 +7,10 @@ import com.squareup.okhttp.Response;
 import okio.BufferedSink;
 import okio.BufferedSource;
 import okio.Okio;
+import okio.Source;
 
+import java.io.Closeable;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.*;
@@ -103,44 +104,34 @@ public class StreamProxy implements Runnable {
         }
     }
 
-    private void serveClientRequest(Socket clientSocket) {
+    private void serveClientRequest(final Socket clientSocket) {
+        clientSockets.add(clientSocket);
+        BufferedSource source = null;
+
         try {
-            BufferedSource source = Okio.buffer(Okio.source(clientSocket));
+            source = Okio.buffer(Okio.source(clientSocket));
 
-            String requestLine = source.readUtf8LineStrict();
-            StringTokenizer st = new StringTokenizer(requestLine);
-            String method = st.nextToken();
-            String uri = st.nextToken();
-            String realUri = uri.substring(1);
+            String realUri = validateClientRequest(source);
+            Response response = executeRealRequest(source, realUri);
 
+            if (Thread.currentThread().isInterrupted()) return;
 
-            Headers.Builder headers = buildHeaders(source);
-            Request request = new Request.Builder()
-                    .url(realUri)
-                    .headers(headers.build())
-                    .build();
-            Response response = client.newCall(request).execute();
-
-            if (Thread.currentThread().isInterrupted()) {
-                return;
-            }
-
-            OutputStream fork = streamFactory.createOutputStream(new Properties());
-            try {
-                writeResponse(clientSocket, response, fork);
-            } catch (IOException e) {
-                //fork.abort();
-                throw e;
-            } finally {
-                if (Thread.currentThread().isInterrupted()) {
-                    // might be called twice, but that's fine
-                    //fork.abort();
-                }
-            }
+            writeResponseStreams(clientSocket, response);
 
         } catch (IOException e) {
             logger.log(Level.WARNING, "Exception while serving client request", e);
+        } finally {
+            closeQuietly(source);
+            clientSockets.remove(clientSocket);
         }
+    }
+
+    private String validateClientRequest(BufferedSource source) throws IOException {
+        String requestLine = source.readUtf8LineStrict();
+        StringTokenizer st = new StringTokenizer(requestLine);
+        String method = st.nextToken();
+        String uri = st.nextToken();
+        return uri.substring(1);
     }
 
     private Headers.Builder buildHeaders(BufferedSource source) throws IOException {
@@ -152,11 +143,35 @@ public class StreamProxy implements Runnable {
         return headers;
     }
 
-    private void writeResponse(Socket clientSocket, Response response, OutputStream fork)
+    private Response executeRealRequest(BufferedSource source, String realUri) throws IOException {
+        Headers.Builder headers = buildHeaders(source);
+        Request request = new Request.Builder()
+                .url(realUri)
+                .headers(headers.build())
+                .build();
+        return client.newCall(request).execute();
+    }
+
+    private void writeResponseStreams(Socket clientSocket, Response response) throws IOException {
+        SideStream sideStream = streamFactory.createOutputStream(new Properties());
+        try {
+            writeResponse(clientSocket, response, sideStream);
+        } catch (IOException e) {
+            sideStream.abort();
+            throw e;
+        } finally {
+            if (Thread.currentThread().isInterrupted()) {
+                // might be called twice, but that's fine
+                sideStream.abort();
+            }
+        }
+    }
+
+    private void writeResponse(Socket clientSocket, Response response, SideStream sideStream)
             throws IOException {
 
-        BufferedSink sink = Okio.buffer(Okio.sink(clientSocket));
         BufferedSource source = response.body().source();
+        BufferedSink sink = Okio.buffer(Okio.sink(clientSocket));
 
         try {
             writeStatusLine(response, sink);
@@ -173,16 +188,21 @@ public class StreamProxy implements Runnable {
                 sink.write(buffer, 0, read);
                 sink.flush();
 
-                fork.write(buffer, 0, read);
-                fork.flush();
+                sideStream.write(buffer, 0, read);
+                sideStream.flush();
             }
 
         } finally {
-            //TODO close quietly
-            source.close();
-            sink.close();
-            fork.close();
+            closeQuietly(source);
+            closeQuietly(sink);
+            closeQuietly(sideStream);
         }
+    }
+
+    private void writeStatusLine(Response response, BufferedSink sink) throws IOException {
+        String protocol = response.protocol().toString().toUpperCase(Locale.US);
+        String statusLine = String.format("%s %d %s\r\n", protocol, response.code(), response.message());
+        sink.writeUtf8(statusLine);
     }
 
     private void writeHeaders(Response response, BufferedSink sink) throws IOException {
@@ -194,12 +214,6 @@ public class StreamProxy implements Runnable {
             sink.writeUtf8("\r\n");
         }
         sink.writeUtf8("\r\n");
-    }
-
-    private void writeStatusLine(Response response, BufferedSink sink) throws IOException {
-        String protocol = response.protocol().toString().toUpperCase(Locale.US);
-        String statusLine = String.format("%s %d %s\r\n", protocol, response.code(), response.message());
-        sink.writeUtf8(statusLine);
     }
 
     public int getPort() {
@@ -228,13 +242,24 @@ public class StreamProxy implements Runnable {
         }
     }
 
+    public void closeQuietly(Closeable closeable) {
+        if (closeable != null) {
+            try {
+                closeable.close();
+            } catch (RuntimeException rethrown) {
+                throw rethrown;
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
     public void closeQuietly(ServerSocket socket) {
         if (socket != null) {
             try {
                 socket.close();
             } catch (RuntimeException rethrown) {
                 throw rethrown;
-            } catch (Exception ignored) {
+            } catch (IOException ignored) {
             }
         }
     }
@@ -245,7 +270,7 @@ public class StreamProxy implements Runnable {
                 socket.close();
             } catch (RuntimeException rethrown) {
                 throw rethrown;
-            } catch (Exception ignored) {
+            } catch (IOException ignored) {
             }
         }
     }
