@@ -14,10 +14,7 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -111,8 +108,8 @@ public class StreamProxy implements Runnable {
         try {
             source = Okio.buffer(Okio.source(clientSocket));
 
-            String realUri = validateClientRequest(source);
-            Response response = executeRealRequest(source, realUri);
+            String url = validateClientRequest(source);
+            Response response = executeRealRequest(source, url);
 
             if (Thread.currentThread().isInterrupted()) return;
 
@@ -129,9 +126,14 @@ public class StreamProxy implements Runnable {
     private String validateClientRequest(BufferedSource source) throws IOException {
         String requestLine = source.readUtf8LineStrict();
         StringTokenizer st = new StringTokenizer(requestLine);
+
         String method = st.nextToken();
-        String uri = st.nextToken();
-        return uri.substring(1);
+        if (!method.equalsIgnoreCase("GET")) {
+            throw new ProxyRequestNotSupportedException("Unable to serve request, only GET is supported");
+        }
+
+        String url = st.nextToken();
+        return url.substring(1);
     }
 
     private Headers.Builder buildHeaders(BufferedSource source) throws IOException {
