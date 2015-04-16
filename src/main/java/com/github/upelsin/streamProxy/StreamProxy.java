@@ -62,17 +62,20 @@ public class StreamProxy implements Runnable {
         }
 
         executor.shutdownNow();
-
-        while (clientSockets.iterator().hasNext()) {
-            Socket socket = clientSockets.iterator().next();
-            closeQuietly(socket);
-        }
+        closeClientSockets();
 
         serverThread.interrupt();
         closeQuietly(serverSocket);
         joinUninterruptibly(serverThread);
 
         serverThread = null;
+    }
+
+    private void closeClientSockets() {
+        for (Iterator<Socket> s = clientSockets.iterator(); s.hasNext(); ) {
+            closeQuietly(s.next());
+            s.remove();
+        }
     }
 
     @Override
@@ -117,6 +120,7 @@ public class StreamProxy implements Runnable {
 
         } catch (IOException e) {
             logger.log(Level.WARNING, "Exception while serving client request", e);
+
         } finally {
             closeQuietly(source);
             clientSockets.remove(clientSocket);
@@ -133,7 +137,7 @@ public class StreamProxy implements Runnable {
         }
 
         String url = st.nextToken();
-        return url.substring(1);
+        return url.substring(1); // skip leading "/"
     }
 
     private Headers.Builder buildHeaders(BufferedSource source) throws IOException {
