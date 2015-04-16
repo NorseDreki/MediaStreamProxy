@@ -7,7 +7,6 @@ import com.squareup.okhttp.Response;
 import okio.BufferedSink;
 import okio.BufferedSource;
 import okio.Okio;
-import okio.Source;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -29,12 +28,12 @@ public class StreamProxy implements Runnable {
 
     private ExecutorService executor;
 
-    private IOutputStreamFactory streamFactory;
+    private SideStreamFactory streamFactory;
 
     private Set<Socket> clientSockets = Collections.newSetFromMap(new ConcurrentHashMap<Socket, Boolean>());
     private OkHttpClient client;
 
-    public StreamProxy(IOutputStreamFactory streamFactory) {
+    public StreamProxy(SideStreamFactory streamFactory) {
         this.streamFactory = streamFactory;
     }
 
@@ -159,7 +158,7 @@ public class StreamProxy implements Runnable {
     }
 
     private void writeResponseStreams(Socket clientSocket, Response response) throws IOException {
-        SideStream sideStream = streamFactory.createOutputStream(new Properties());
+        SideStream sideStream = streamFactory.createSideStream(new Properties());
         try {
             writeResponse(clientSocket, response, sideStream);
         } catch (IOException e) {

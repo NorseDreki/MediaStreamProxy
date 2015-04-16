@@ -1,6 +1,6 @@
 package com.github.upelsin.streamProxy.test;
 
-import com.github.upelsin.streamProxy.IOutputStreamFactory;
+import com.github.upelsin.streamProxy.SideStreamFactory;
 import com.github.upelsin.streamProxy.StreamProxy;
 import com.squareup.okhttp.mockwebserver.MockResponse;
 import com.squareup.okhttp.mockwebserver.MockWebServer;
@@ -36,7 +36,7 @@ public class StreamProxyTest {
     public Timeout globalTimeout = new Timeout(4000);*/
 
     @Mock
-    private IOutputStreamFactory mockStreamFactory;
+    private SideStreamFactory mockStreamFactory;
 
     @Before
     public void setUp() {
@@ -172,8 +172,8 @@ public class StreamProxyTest {
         final CountDownLatch finishLatch = new CountDownLatch(NUM_CONCURRENT_REQUESTS);
         MockWebServer server = new MockWebServer();
 
-        ByteArrayOutputStream outStream = new ByteArrayOutputStream();
-        given(mockStreamFactory.createOutputStream(any(Properties.class))).willReturn(outStream);
+        MockSideStream sideStream = new MockSideStream();
+        given(mockStreamFactory.createSideStream(any(Properties.class))).willReturn(sideStream);
 
         for (int i = 0; i < NUM_CONCURRENT_REQUESTS; i++) {
             server.enqueue(new MockResponse().setBody(MOCK_RESPONSE_BODY));
@@ -222,8 +222,8 @@ public class StreamProxyTest {
 
     @Test
     public void should_write_response_to_output_stream() throws Exception {
-        ByteArrayOutputStream outStream = new ByteArrayOutputStream();
-        given(mockStreamFactory.createOutputStream(any(Properties.class))).willReturn(outStream);
+        MockSideStream sideStream = new MockSideStream();
+        given(mockStreamFactory.createSideStream(any(Properties.class))).willReturn(sideStream);
 
         proxy.start();
         MockWebServer server = new MockWebServer();
@@ -235,7 +235,7 @@ public class StreamProxyTest {
         assertEquals("GET / HTTP/1.1", request.getRequestLine());
 
         //verify(outStream).write(any(byte[].class), any(Integer.class), any(Integer.class));
-        byte[] bytes = outStream.toByteArray();
+        byte[] bytes = sideStream.toByteArray();
         String outStreamResult = new String(bytes, "UTF8");
 
         assertThat(outStreamResult, is(equalTo(MOCK_RESPONSE_BODY)));

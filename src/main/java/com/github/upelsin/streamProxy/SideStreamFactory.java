@@ -6,7 +6,7 @@ import java.util.Properties;
 /**
  * Created by Alexey Dmitriev <mr.alex.dmitriev@gmail.com> on 25.02.2015.
  */
-public interface IOutputStreamFactory {
+public interface SideStreamFactory {
 
-    SideStream createOutputStream(Properties props);
+    SideStream createSideStream(Properties props);
 }
