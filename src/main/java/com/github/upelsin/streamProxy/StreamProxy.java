@@ -37,9 +37,10 @@ public class StreamProxy implements Runnable {
         this.streamFactory = streamFactory;
     }
 
-    public void start() {
+    public void start(int port) {
         try {
-            serverSocket = new ServerSocket(0);
+            serverSocket = new ServerSocket(port);
+            serverSocket.setReuseAddress(port != 0);
         } catch (IOException e) {
             throw new ProxyNotStartedException(e);
         }
@@ -53,6 +54,10 @@ public class StreamProxy implements Runnable {
 
         serverThread = threadFactory.newThread(this);
         serverThread.start();
+    }
+
+    public void start() {
+        start(0);
     }
 
     public void shutdown() {

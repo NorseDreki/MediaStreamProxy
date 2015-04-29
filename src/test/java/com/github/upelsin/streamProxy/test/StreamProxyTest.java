@@ -1,10 +1,14 @@
 package com.github.upelsin.streamProxy.test;
 
+import com.github.upelsin.streamProxy.ProxyNotStartedException;
 import com.github.upelsin.streamProxy.SideStreamFactory;
 import com.github.upelsin.streamProxy.StreamProxy;
 import com.squareup.okhttp.mockwebserver.MockResponse;
 import com.squareup.okhttp.mockwebserver.MockWebServer;
 import com.squareup.okhttp.mockwebserver.RecordedRequest;
+import okio.Buffer;
+import okio.BufferedSource;
+import okio.Okio;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mock;
@@ -30,6 +34,7 @@ public class StreamProxyTest {
 
     public static final int NUM_CONCURRENT_REQUESTS = 5;
     public static final String MOCK_RESPONSE_BODY = "Hello";
+    public static final int DEFAULT_PORT = 22333;
     private StreamProxy proxy;
 
 /*    @Rule
@@ -73,6 +78,12 @@ public class StreamProxyTest {
     @Test(expected = IllegalStateException.class)
     public void should_throw_when_run_called_directly_before_starting() {
         proxy.run();
+    }
+
+    @Test(expected = ProxyNotStartedException.class)
+    public void should_throw_when_port_already_taken() {
+        proxy.start(DEFAULT_PORT);
+        proxy.start(DEFAULT_PORT);
     }
 
     @Test
@@ -173,6 +184,7 @@ public class StreamProxyTest {
         MockWebServer server = new MockWebServer();
 
         MockSideStream sideStream = new MockSideStream();
+        //all threads sharing
         given(mockStreamFactory.createSideStream(any(Properties.class))).willReturn(sideStream);
 
         for (int i = 0; i < NUM_CONCURRENT_REQUESTS; i++) {
@@ -211,7 +223,8 @@ public class StreamProxyTest {
     }
 
     @Test
-    public void should_signal_failure_to_output_stream() {
+    public void should_signal_failure_to_output_stream() throws FileNotFoundException {
+        new MockResponse().setBody(loadMp3().buffer());
 
     }
 
@@ -273,4 +286,13 @@ public class StreamProxyTest {
             Thread.currentThread().interrupt();
         }
     }
+
+    public BufferedSource loadMp3() throws FileNotFoundException {
+        File resourcesDirectory = new File("src/test/resources/");
+        File resource = new File(resourcesDirectory, "track.mp3");
+
+        return Okio.buffer(Okio.source(resource));
+
+    }
+
 }

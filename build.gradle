@@ -4,7 +4,7 @@ apply plugin: 'maven'
 configure(install.repositories.mavenInstaller) {
     pom.project {
         groupId 'com.github.upelsin'
-        artifactId 'rxjava-cache-dispatcher'
+        artifactId 'stream-proxy'
         inceptionYear '2015'
         packaging 'jar'
         licenses {
@@ -42,8 +42,6 @@ repositories {
 dependencies {
     compile 'com.squareup.okio:okio:1.3.0'
     compile 'com.squareup.okhttp:okhttp:2.3.0'
-    compile 'org.apache.httpcomponents:httpclient:4.4.1'
-
 
     testCompile 'junit:junit:4.11'
     testCompile 'org.mockito:mockito-core:1.9.5'
