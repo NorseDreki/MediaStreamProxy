@@ -1,6 +1,6 @@
-package com.github.upelsin.streamProxy.test;
+package com.github.upelsin.streamProxy.test.mocks;
 
-import com.github.upelsin.streamProxy.SideStream;
+import com.github.upelsin.streamProxy.ForkedStream;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -8,11 +8,11 @@ import java.io.IOException;
 /**
  * Created by upelsin on 16.04.2015.
  */
-public class MockSideStream implements SideStream {
+public class MockForkedStream implements ForkedStream {
 
     private final ByteArrayOutputStream delegate;
 
-    public MockSideStream() {
+    public MockForkedStream() {
         delegate = new ByteArrayOutputStream();
     }
 

@@ -1,12 +1,12 @@
 package com.github.upelsin.streamProxy.test;
 
 import com.github.upelsin.streamProxy.ProxyNotStartedException;
-import com.github.upelsin.streamProxy.SideStreamFactory;
+import com.github.upelsin.streamProxy.ForkedStreamFactory;
 import com.github.upelsin.streamProxy.StreamProxy;
+import com.github.upelsin.streamProxy.test.mocks.MockForkedStream;
 import com.squareup.okhttp.mockwebserver.MockResponse;
 import com.squareup.okhttp.mockwebserver.MockWebServer;
 import com.squareup.okhttp.mockwebserver.RecordedRequest;
-import okio.Buffer;
 import okio.BufferedSource;
 import okio.Okio;
 import org.junit.Before;
@@ -26,6 +26,8 @@ import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.*;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Matchers.any;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 
 /**
  * Created by upelsin on 13.04.2015.
@@ -41,7 +43,7 @@ public class StreamProxyTest {
     public Timeout globalTimeout = new Timeout(4000);*/
 
     @Mock
-    private SideStreamFactory mockStreamFactory;
+    private ForkedStreamFactory mockStreamFactory;
 
     @Before
     public void setUp() {
@@ -183,9 +185,9 @@ public class StreamProxyTest {
         final CountDownLatch finishLatch = new CountDownLatch(NUM_CONCURRENT_REQUESTS);
         MockWebServer server = new MockWebServer();
 
-        MockSideStream sideStream = new MockSideStream();
+        MockForkedStream sideStream = new MockForkedStream();
         //all threads sharing
-        given(mockStreamFactory.createSideStream(any(Properties.class))).willReturn(sideStream);
+        given(mockStreamFactory.createForkedStream(any(Properties.class))).willReturn(sideStream);
 
         for (int i = 0; i < NUM_CONCURRENT_REQUESTS; i++) {
             server.enqueue(new MockResponse().setBody(MOCK_RESPONSE_BODY));
@@ -223,9 +225,45 @@ public class StreamProxyTest {
     }
 
     @Test
-    public void should_signal_failure_to_output_stream() throws FileNotFoundException {
-        new MockResponse().setBody(loadMp3().buffer());
+    public void should_signal_failure_to_output_stream() throws IOException, InterruptedException {
+        MockForkedStream sideStream = spy(new MockForkedStream());
+        given(mockStreamFactory.createForkedStream(any(Properties.class))).willReturn(sideStream);
 
+        proxy.start();
+        MockWebServer server = new MockWebServer();
+        MockResponse response = new MockResponse().setBody(loadMp3().buffer());
+        server.enqueue(response);
+        server.start();
+
+        String serverUrl = server.getUrl("/").toString();
+
+        final String proxiedUrl = String.format("http://127.0.0.1:%d/%s", proxy.getPort(), serverUrl);
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    URL url = new URL(proxiedUrl);
+                    HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+                    InputStream in = connection.getInputStream();
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(in));
+                    String s = reader.readLine();
+
+                    assertEquals(HttpURLConnection.HTTP_OK, connection.getResponseCode());
+                    //assertEquals(body, reader.readLine());
+
+                } catch (IOException e) {
+                    throw new RuntimeException("Unable to execute request for " + proxiedUrl, e);
+                }
+
+            }
+        }).start();
+
+        Thread.sleep(3000);
+        proxy.shutdown();
+
+
+        verify(sideStream).abort();
     }
 
     @Test
@@ -235,8 +273,8 @@ public class StreamProxyTest {
 
     @Test
     public void should_write_response_to_output_stream() throws Exception {
-        MockSideStream sideStream = new MockSideStream();
-        given(mockStreamFactory.createSideStream(any(Properties.class))).willReturn(sideStream);
+        MockForkedStream sideStream = new MockForkedStream();
+        given(mockStreamFactory.createForkedStream(any(Properties.class))).willReturn(sideStream);
 
         proxy.start();
         MockWebServer server = new MockWebServer();

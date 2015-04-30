@@ -7,7 +7,7 @@ import java.io.IOException;
 /**
  * Created by upelsin on 15.04.2015.
  */
-public interface SideStream extends Closeable, Flushable {
+public interface ForkedStream extends Closeable, Flushable {
 
     void abort();
 

@@ -28,12 +28,12 @@ public class StreamProxy implements Runnable {
 
     private ExecutorService executor;
 
-    private SideStreamFactory streamFactory;
+    private ForkedStreamFactory streamFactory;
 
     private Set<Socket> clientSockets = Collections.newSetFromMap(new ConcurrentHashMap<Socket, Boolean>());
     private OkHttpClient client;
 
-    public StreamProxy(SideStreamFactory streamFactory) {
+    public StreamProxy(ForkedStreamFactory streamFactory) {
         this.streamFactory = streamFactory;
     }
 
@@ -69,7 +69,7 @@ public class StreamProxy implements Runnable {
         closeClientSockets();
 
         serverThread.interrupt();
-        closeQuietly(serverSocket);
+        //closeQuietly(serverSocket);
         joinUninterruptibly(serverThread);
 
         serverThread = null;
@@ -163,21 +163,21 @@ public class StreamProxy implements Runnable {
     }
 
     private void writeResponseStreams(Socket clientSocket, Response response) throws IOException {
-        SideStream sideStream = streamFactory.createSideStream(new Properties());
+        ForkedStream forkedStream = streamFactory.createForkedStream(new Properties());
         try {
-            writeResponse(clientSocket, response, sideStream);
+            writeResponse(clientSocket, response, forkedStream);
         } catch (IOException e) {
-            sideStream.abort();
+            forkedStream.abort();
             throw e;
         } finally {
             if (Thread.currentThread().isInterrupted()) {
                 // might be called twice, but that's fine
-                sideStream.abort();
+                forkedStream.abort();
             }
         }
     }
 
-    private void writeResponse(Socket clientSocket, Response response, SideStream sideStream)
+    private void writeResponse(Socket clientSocket, Response response, ForkedStream forkedStream)
             throws IOException {
 
         BufferedSource source = response.body().source();
@@ -198,14 +198,17 @@ public class StreamProxy implements Runnable {
                 sink.write(buffer, 0, read);
                 sink.flush();
 
-                sideStream.write(buffer, 0, read);
-                sideStream.flush();
+                forkedStream.write(buffer, 0, read);
+                forkedStream.flush();
             }
+        } catch (IOException e) {
+            throw e;
 
         } finally {
+            //TODO close sideStream
             closeQuietly(source);
             closeQuietly(sink);
-            closeQuietly(sideStream);
+            closeQuietly(forkedStream);
         }
     }
 
