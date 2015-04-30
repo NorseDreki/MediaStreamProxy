@@ -8,7 +8,6 @@ import okio.BufferedSink;
 import okio.BufferedSource;
 import okio.Okio;
 
-import java.io.Closeable;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -50,9 +49,7 @@ public class StreamProxy implements Runnable {
 
         client = new OkHttpClient();
 
-        ExceptionHandlingThreadFactory threadFactory =
-                new ExceptionHandlingThreadFactory(new LoggingExceptionHandler(logger));
-
+        ThreadFactory threadFactory = ExceptionHandlingThreadFactory.loggingExceptionThreadFactory();
         executor = Executors.newCachedThreadPool(threadFactory);
 
         serverThread = threadFactory.newThread(this);
@@ -238,35 +235,5 @@ public class StreamProxy implements Runnable {
         }
 
         return serverSocket.getLocalPort();
-    }
-
-
-    private static class ExceptionHandlingThreadFactory implements ThreadFactory {
-        private static final ThreadFactory defaultFactory = Executors.defaultThreadFactory();
-        private final Thread.UncaughtExceptionHandler handler;
-
-        public ExceptionHandlingThreadFactory(Thread.UncaughtExceptionHandler handler) {
-            this.handler = handler;
-        }
-
-        @Override
-        public Thread newThread(Runnable run) {
-            Thread thread = defaultFactory.newThread(run);
-            thread.setUncaughtExceptionHandler(handler);
-            return thread;
-        }
-    }
-
-    private static class LoggingExceptionHandler implements Thread.UncaughtExceptionHandler {
-        private final Logger logger;
-
-        public LoggingExceptionHandler(Logger logger) {
-            this.logger = logger;
-        }
-
-        @Override
-        public void uncaughtException(Thread thread, Throwable t) {
-            logger.log(Level.SEVERE, "Uncaught exception for " + thread.getName(), t);
-        }
     }
 }

@@ -2,8 +2,8 @@ package com.github.upelsin.streamProxy.test;
 
 import com.github.upelsin.streamProxy.ProxyNotStartedException;
 import com.github.upelsin.streamProxy.StreamProxy;
+import com.github.upelsin.streamProxy.Utils;
 import com.github.upelsin.streamProxy.test.mocks.MockForkedStreamFactory;
-import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -15,10 +15,10 @@ import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.*;
 
 /**
- * Testing {@code StreamProxy}'s lifecycle methods.
- *
- * Including: valid startup and shutdown, obtaining port, etc.
- *
+ * Tests for {@link StreamProxy}'s lifecycle methods.
+ * <p>
+ * Include: valid startup and shutdown, obtaining port, etc.
+ * <p>
  * Created by upelsin on 30.04.2015.
  */
 public class StreamProxyLifecycleTest {
@@ -109,13 +109,7 @@ public class StreamProxyLifecycleTest {
         } catch (IOException e) {
             // server socket is in use
         } finally {
-            if (ss != null) {
-                try {
-                    ss.close();
-                } catch (IOException e) {
-                /* should not be thrown */
-                }
-            }
+            Utils.closeQuietly(ss);
         }
 
         return true;
