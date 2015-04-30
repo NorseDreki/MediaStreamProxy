@@ -17,6 +17,9 @@ import java.util.concurrent.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import static com.github.upelsin.streamProxy.Utils.closeQuietly;
+import static com.github.upelsin.streamProxy.Utils.joinUninterruptibly;
+
 
 public class StreamProxy implements Runnable {
 
@@ -237,56 +240,6 @@ public class StreamProxy implements Runnable {
         return serverSocket.getLocalPort();
     }
 
-    public void joinUninterruptibly(Thread toJoin) {
-        boolean interrupted = false;
-        try {
-            while (true) {
-                try {
-                    toJoin.join();
-                    return;
-                } catch (InterruptedException e) {
-                    interrupted = true;
-                }
-            }
-        } finally {
-            if (interrupted) {
-                Thread.currentThread().interrupt();
-            }
-        }
-    }
-
-    public void closeQuietly(Closeable closeable) {
-        if (closeable != null) {
-            try {
-                closeable.close();
-            } catch (RuntimeException rethrown) {
-                throw rethrown;
-            } catch (Exception ignored) {
-            }
-        }
-    }
-
-    public void closeQuietly(ServerSocket socket) {
-        if (socket != null) {
-            try {
-                socket.close();
-            } catch (RuntimeException rethrown) {
-                throw rethrown;
-            } catch (IOException ignored) {
-            }
-        }
-    }
-
-    public void closeQuietly(Socket socket) {
-        if (socket != null) {
-            try {
-                socket.close();
-            } catch (RuntimeException rethrown) {
-                throw rethrown;
-            } catch (IOException ignored) {
-            }
-        }
-    }
 
     private static class ExceptionHandlingThreadFactory implements ThreadFactory {
         private static final ThreadFactory defaultFactory = Executors.defaultThreadFactory();
