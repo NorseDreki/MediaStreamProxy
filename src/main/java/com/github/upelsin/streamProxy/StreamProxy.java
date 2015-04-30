@@ -69,7 +69,7 @@ public class StreamProxy implements Runnable {
         closeClientSockets();
 
         serverThread.interrupt();
-        //closeQuietly(serverSocket);
+        closeQuietly(serverSocket);
         joinUninterruptibly(serverThread);
 
         serverThread = null;

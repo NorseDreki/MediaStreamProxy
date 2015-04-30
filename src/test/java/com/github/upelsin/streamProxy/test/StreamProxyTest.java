@@ -4,12 +4,15 @@ import com.github.upelsin.streamProxy.ProxyNotStartedException;
 import com.github.upelsin.streamProxy.ForkedStreamFactory;
 import com.github.upelsin.streamProxy.StreamProxy;
 import com.github.upelsin.streamProxy.test.mocks.MockForkedStream;
+import com.github.upelsin.streamProxy.test.rules.MockWebServerRule;
+import com.github.upelsin.streamProxy.test.rules.StreamProxyRule;
 import com.squareup.okhttp.mockwebserver.MockResponse;
 import com.squareup.okhttp.mockwebserver.MockWebServer;
 import com.squareup.okhttp.mockwebserver.RecordedRequest;
 import okio.BufferedSource;
 import okio.Okio;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
@@ -41,6 +44,12 @@ public class StreamProxyTest {
 
 /*    @Rule
     public Timeout globalTimeout = new Timeout(4000);*/
+
+    @Rule
+    public StreamProxyRule proxyRule = new StreamProxyRule();
+
+    @Rule
+    public MockWebServerRule server = new MockWebServerRule();
 
     @Mock
     private ForkedStreamFactory mockStreamFactory;
@@ -102,17 +111,11 @@ public class StreamProxyTest {
 
     @Test
     public void should_serve_request() throws Exception {
-        proxy.start();
-        MockWebServer server = new MockWebServer();
         server.enqueue(new MockResponse().setBody(MOCK_RESPONSE_BODY));
-        server.start();
 
         assertSuccessfulRequestFor(server.getUrl("/").toString(), MOCK_RESPONSE_BODY);
         RecordedRequest request = server.takeRequest();
         assertEquals("GET / HTTP/1.1", request.getRequestLine());
-
-        server.shutdown();
-        proxy.shutdown();
     }
 
     @Test
@@ -129,7 +132,7 @@ public class StreamProxyTest {
     }
 
     private void assertSuccessfulRequestFor(String serverUrl, String body) {
-        String proxiedUrl = String.format("http://127.0.0.1:%d/%s", proxy.getPort(), serverUrl);
+        String proxiedUrl = String.format("http://127.0.0.1:%d/%s", proxyRule.getPort(), serverUrl);
 
         try {
             URL url = new URL(proxiedUrl);
