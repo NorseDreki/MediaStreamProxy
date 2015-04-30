@@ -5,7 +5,9 @@ import com.github.upelsin.streamProxy.StreamProxy;
 import com.github.upelsin.streamProxy.Utils;
 import com.github.upelsin.streamProxy.test.mocks.MockForkedStreamFactory;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.Timeout;
 
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -28,6 +30,9 @@ public class StreamProxyLifecycleTest {
     public static final int NUM_CONCURRENT_REQUESTS = 5;
 
     private StreamProxy proxy;
+
+    @Rule
+    public Timeout globalTimeout = new Timeout(1000);
 
     @Before
     public void setUp() {
