@@ -9,6 +9,7 @@ import okio.BufferedSource;
 import okio.Okio;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.*;
@@ -182,6 +183,7 @@ public class StreamProxy implements Runnable {
 
         BufferedSource source = response.body().source();
         BufferedSink sink = Okio.buffer(Okio.sink(clientSocket));
+        OutputStream os = clientSocket.getOutputStream();
 
         try {
             writeStatusLine(response, sink);
@@ -192,19 +194,25 @@ public class StreamProxy implements Runnable {
             while (!Thread.currentThread().isInterrupted()) {
                 int read = source.read(buffer);
                 if (read == -1) {
+                    logger.log(Level.INFO, "Breaking");
                     break;
                 }
+                logger.log(Level.INFO, "Writing! " + read);
 
                 sink.write(buffer, 0, read);
                 sink.flush();
+/*                os.write(buffer, 0, read);
+                os.flush();*/
 
                 forkedStream.write(buffer, 0, read);
                 forkedStream.flush();
             }
         } catch (IOException e) {
+            logger.log(Level.INFO, e.getMessage());
             throw e;
 
         } finally {
+            closeQuietly(os);
             closeQuietly(source);
             closeQuietly(sink);
             closeQuietly(forkedStream);
