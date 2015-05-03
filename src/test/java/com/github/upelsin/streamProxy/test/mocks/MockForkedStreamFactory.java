@@ -10,8 +10,15 @@ import java.util.Properties;
  */
 public class MockForkedStreamFactory implements ForkedStreamFactory {
 
+    private Properties lastProps;
+
     @Override
     public ForkedStream createForkedStream(Properties props) {
-        return new MockForkedStream();
+        this.lastProps = props;
+        return new MockForkedStream(props);
+    }
+
+    public Properties getLastProps() {
+        return lastProps;
     }
 }

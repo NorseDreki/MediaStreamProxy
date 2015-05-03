@@ -4,6 +4,7 @@ import com.github.upelsin.streamProxy.ForkedStream;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.Properties;
 import java.util.logging.Logger;
 
 /**
@@ -13,12 +14,15 @@ public class MockForkedStream implements ForkedStream {
 
     private Logger logger = Logger.getLogger(MockForkedStream.class.getName());
 
+    private final Properties props;
+
     private final ByteArrayOutputStream delegate;
 
     private boolean aborted;
 
-    public MockForkedStream() {
-        delegate = new ByteArrayOutputStream();
+    public MockForkedStream(Properties props) {
+        this.props = props;
+        this.delegate = new ByteArrayOutputStream();
     }
 
     @Override
