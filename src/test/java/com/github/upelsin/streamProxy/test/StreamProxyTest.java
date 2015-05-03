@@ -1,11 +1,11 @@
 package com.github.upelsin.streamProxy.test;
 
+import com.github.upelsin.streamProxy.test.mocks.MockForkedStream;
 import com.github.upelsin.streamProxy.test.rules.MockWebServerRule;
 import com.github.upelsin.streamProxy.test.rules.StreamProxyRule;
 import com.squareup.okhttp.mockwebserver.MockResponse;
 import com.squareup.okhttp.mockwebserver.RecordedRequest;
 import okio.Buffer;
-import okio.BufferedSource;
 import okio.Okio;
 import okio.Source;
 import org.junit.Rule;
@@ -14,12 +14,16 @@ import org.junit.Test;
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.Properties;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Matchers.any;
+import static org.mockito.Mockito.*;
 
 /**
  * Created by upelsin on 13.04.2015.
@@ -44,7 +48,7 @@ public class StreamProxyTest {
 
     private RecordedRequest assertSuccessfulRequestFor(HttpURLConnection connection, byte[] expectedBody) {
         try {
-            byte[] responseBody = readInputStream(connection.getInputStream());
+            byte[] responseBody = readFully(connection.getInputStream());
             RecordedRequest request = server.takeRequest();
 
             assertEquals("GET / HTTP/1.1", request.getRequestLine());
@@ -120,20 +124,47 @@ public class StreamProxyTest {
 
     @Test
     public void should_signal_failure_to_output_stream() throws IOException, InterruptedException {
-        server.enqueue(new MockResponse().setBody(RESPONSE_BODY_MP3).throttleBody(65536, 3000, TimeUnit.MILLISECONDS));
+        MockForkedStream forkedStream = spy(new MockForkedStream());
+        given(proxy.getForkedStreamFactory().createForkedStream(any(Properties.class))).willReturn(forkedStream);
+        server.enqueue(new MockResponse().setBody(RESPONSE_BODY_MP3).throttleBody(65536, 30000, TimeUnit.MILLISECONDS));
 
         new Thread(new Runnable() {
             @Override
             public void run() {
-                assertSuccessfulRequestFor(createUrlConnection(), RESPONSE_BODY_MP3.readByteArray());
+                try {
+                    readFully(createUrlConnection().getInputStream());
+                } catch (IOException e) {
+                    fail();
+                }
             }
         }).start();
 
         Thread.sleep(1000);
-        //proxy.shutdown();
+        proxy.shutdown();
+
+        verify(forkedStream).write(any(byte[].class), any(Integer.class), any(Integer.class));
+        verify(forkedStream).abort();
+    }
+
+    @Test
+    public void should_signal_failure_to_foked_stream_when_client_disconnected() throws Exception {
+        MockForkedStream forkedStream = spy(new MockForkedStream());
+        given(proxy.getForkedStreamFactory().createForkedStream(any(Properties.class))).willReturn(forkedStream);
+        server.enqueue(new MockResponse().setBody(RESPONSE_BODY_MP3));
+
+        HttpURLConnection conn = null;
+        try {
+            conn = createUrlConnection();
+            readThenDrop(conn.getInputStream());
+        } catch (IOException e) {
+            fail();
+        } finally {
+            conn.disconnect();
+        }
 
 
-        //verify(sideStream).abort();
+        //verify(forkedStream).write(any(byte[].class), any(Integer.class), any(Integer.class));
+        verify(forkedStream).abort();
     }
 
     @Test
@@ -143,17 +174,14 @@ public class StreamProxyTest {
 
     @Test
     public void should_write_response_to_output_stream() throws Exception {
-        server.enqueue(new MockResponse().setBody(MOCK_RESPONSE_BODY));
+        MockForkedStream forkedStream = spy(new MockForkedStream());
+        given(proxy.getForkedStreamFactory().createForkedStream(any(Properties.class))).willReturn(forkedStream);
+        server.enqueue(new MockResponse().setBody(RESPONSE_BODY_MP3));
 
-        assertSuccessfulRequestFor(createUrlConnection(), MOCK_RESPONSE_BODY.getBytes());
-        RecordedRequest request = server.takeRequest();
-        assertEquals("GET / HTTP/1.1", request.getRequestLine());
+        readFully(createUrlConnection().getInputStream());
 
-        //verify(outStream).write(any(byte[].class), any(Integer.class), any(Integer.class));
-        /*byte[] bytes = sideStream.toByteArray();
-        String outStreamResult = new String(bytes, "UTF8");
-
-        assertThat(outStreamResult, is(equalTo(MOCK_RESPONSE_BODY)));*/
+        byte[] bytes = forkedStream.toByteArray();
+        assertArrayEquals(RESPONSE_BODY_MP3.readByteArray(), bytes);
     }
 
     private HttpURLConnection createUrlConnection() {
@@ -170,7 +198,7 @@ public class StreamProxyTest {
         }
     }
 
-    private byte[] readInputStream(InputStream is) throws IOException {
+    private byte[] readFully(InputStream is) throws IOException {
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         int nRead;
         byte[] data = new byte[16384];
@@ -182,6 +210,14 @@ public class StreamProxyTest {
         buffer.flush();
 
         return buffer.toByteArray();
+    }
+
+    private void readThenDrop(InputStream is) throws IOException {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        int nRead;
+        byte[] data = new byte[163800];
+        nRead = is.read(data, 0, data.length);
+        is.close();
     }
 
     private void await(CountDownLatch latch) {

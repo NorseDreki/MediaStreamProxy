@@ -66,22 +66,22 @@ public class StreamProxyLifecycleTest {
     }
 
     @Test(expected = IllegalStateException.class)
-    public void should_throw_when_stopping_before_starting() {
+    public void should_throw_when_stopped_before_starting() {
         proxy.shutdown();
     }
 
     @Test(expected = IllegalStateException.class)
-    public void should_throw_when_getting_port_before_starting() {
+    public void should_throw_when_getting_port_before_started() {
         proxy.getPort();
     }
 
     @Test(expected = IllegalStateException.class)
-    public void should_throw_when_run_called_directly_before_starting() {
+    public void should_throw_when_run_called_directly_before_started() {
         proxy.run();
     }
 
     @Test
-    public void should_throw_when_port_is_already_taken() {
+    public void should_throw_when_port_has_already_been_taken() {
         try {
             proxy.start(DEFAULT_PORT);
             proxy.start(DEFAULT_PORT);

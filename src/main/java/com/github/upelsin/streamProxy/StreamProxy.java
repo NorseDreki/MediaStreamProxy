@@ -205,7 +205,6 @@ public class StreamProxy implements Runnable {
             throw e;
 
         } finally {
-            //TODO close sideStream
             closeQuietly(source);
             closeQuietly(sink);
             closeQuietly(forkedStream);
@@ -235,5 +234,9 @@ public class StreamProxy implements Runnable {
         }
 
         return serverSocket.getLocalPort();
+    }
+
+    public ForkedStreamFactory getForkedStreamFactory() {
+        return streamFactory;
     }
 }
