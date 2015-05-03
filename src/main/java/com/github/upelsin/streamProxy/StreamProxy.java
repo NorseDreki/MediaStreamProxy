@@ -9,19 +9,18 @@ import okio.BufferedSource;
 import okio.Okio;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.net.URLDecoder;
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import static com.github.upelsin.streamProxy.Utils.closeQuietly;
-import static com.github.upelsin.streamProxy.Utils.joinUninterruptibly;
+import static com.github.upelsin.streamProxy.Utils.*;
 
 
 public class StreamProxy implements Runnable {
@@ -120,12 +119,12 @@ public class StreamProxy implements Runnable {
             source = Okio.buffer(Okio.source(clientSocket));
 
             String url = parseGetRequestUrl(source);
-            Response response = executeRealRequest(source, url);
             Properties queryParams = parseQueryParams(url);
+            Response response = executeRealRequest(source, url);
 
             if (Thread.currentThread().isInterrupted()) return;
 
-            writeResponseStreams(clientSocket, response, queryParams);
+            writeClientResponse(clientSocket, response, queryParams);
 
         } catch (IOException e) {
             logger.log(Level.WARNING, "Exception while serving client request", e);
@@ -144,30 +143,6 @@ public class StreamProxy implements Runnable {
         }
 
         return queryParams;
-    }
-
-    public static Map<String, List<String>> getUrlParameters(String url)
-            throws UnsupportedEncodingException {
-        Map<String, List<String>> params = new HashMap<>();
-        String[] urlParts = url.split("\\?");
-        if (urlParts.length > 1) {
-            String query = urlParts[1];
-            for (String param : query.split("&")) {
-                String pair[] = param.split("=");
-                String key = URLDecoder.decode(pair[0], "UTF-8");
-                String value = "";
-                if (pair.length > 1) {
-                    value = URLDecoder.decode(pair[1], "UTF-8");
-                }
-                List<String> values = params.get(key);
-                if (values == null) {
-                    values = new ArrayList<String>();
-                    params.put(key, values);
-                }
-                values.add(value);
-            }
-        }
-        return params;
     }
 
     private String parseGetRequestUrl(BufferedSource source) throws IOException {
@@ -201,7 +176,7 @@ public class StreamProxy implements Runnable {
         return client.newCall(request).execute();
     }
 
-    private void writeResponseStreams(Socket clientSocket, Response response, Properties props) throws IOException {
+    private void writeClientResponse(Socket clientSocket, Response response, Properties props) throws IOException {
         ForkedStream forkedStream = streamFactory.createForkedStream(props);
         try {
             writeResponse(clientSocket, response, forkedStream);
@@ -221,8 +196,6 @@ public class StreamProxy implements Runnable {
 
         BufferedSource source = response.body().source();
         BufferedSink sink = Okio.buffer(Okio.sink(clientSocket));
-        OutputStream os = clientSocket.getOutputStream();
-        InputStream responseBody = response.body().byteStream();
 
         try {
             writeStatusLine(response, sink);
@@ -231,28 +204,18 @@ public class StreamProxy implements Runnable {
 
             byte[] buffer = new byte[16384];
             while (!Thread.currentThread().isInterrupted()) {
-                int read = responseBody.read(buffer);//source.read(buffer);
+                int read = source.read(buffer);
                 if (read == -1) {
-                    logger.log(Level.INFO, "Breaking");
                     break;
                 }
-                logger.log(Level.INFO, "Writing! " + read);
 
                 sink.write(buffer, 0, read);
                 sink.flush();
-/*                os.write(buffer, 0, read);
-                os.flush();*/
 
                 forkedStream.write(buffer, 0, read);
                 forkedStream.flush();
             }
-        } catch (IOException e) {
-            logger.log(Level.INFO, e.getMessage());
-            throw e;
-
         } finally {
-            closeQuietly(os);
-            closeQuietly(responseBody);
             closeQuietly(source);
             closeQuietly(sink);
             closeQuietly(forkedStream);
