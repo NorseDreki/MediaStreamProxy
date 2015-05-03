@@ -15,12 +15,15 @@ public class MockForkedStream implements ForkedStream {
 
     private final ByteArrayOutputStream delegate;
 
+    private boolean aborted;
+
     public MockForkedStream() {
         delegate = new ByteArrayOutputStream();
     }
 
     @Override
     public void abort() {
+        aborted = true;
         logger.info("Called abort()");
     }
 
@@ -41,5 +44,9 @@ public class MockForkedStream implements ForkedStream {
 
     public byte[] toByteArray() {
         return delegate.toByteArray();
+    }
+
+    public boolean isAborted() {
+        return aborted;
     }
 }
