@@ -18,7 +18,7 @@ public class MockForkedStreamFactory implements ForkedStreamFactory {
         return new MockForkedStream(props);
     }
 
-    public Properties getLastProps() {
+    public Properties getLatestQueryParams() {
         return lastProps;
     }
 }

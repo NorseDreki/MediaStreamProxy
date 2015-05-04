@@ -40,4 +40,8 @@ public class StreamProxyRule extends ExternalResource {
         proxy.shutdown();
         started = false;
     }
+
+    public StreamProxy get() {
+        return proxy;
+    }
 }

@@ -7,19 +7,17 @@ import com.github.upelsin.streamProxy.test.rules.StreamProxyRule;
 import com.squareup.okhttp.mockwebserver.MockResponse;
 import com.squareup.okhttp.mockwebserver.RecordedRequest;
 import okio.Buffer;
-import okio.Okio;
-import okio.Source;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.Timeout;
 
 import java.io.*;
 import java.net.HttpURLConnection;
-import java.net.URL;
 import java.util.Properties;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
+import static com.github.upelsin.streamProxy.test.StreamProxyTestUtils.*;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.junit.Assert.*;
 import static org.mockito.BDDMockito.given;
@@ -47,27 +45,33 @@ public class StreamProxyTest {
 
     @Test
     public void should_serve_request() throws Exception {
+        HttpURLConnection conn = createUrlConnection(server.get(), proxy.get());
+
         server.enqueue(new MockResponse().setBody(RESPONSE_BODY_MP3));
-        assertSuccessfulRequestFor(createUrlConnection(), RESPONSE_BODY_MP3.readByteArray());
+
+        assertSuccessfulRequestFor(conn, RESPONSE_BODY_MP3.readByteArray());
     }
 
     @Test
     public void should_serve_throttled_request() throws Exception {
+        HttpURLConnection conn = createUrlConnection(server.get(), proxy.get());
+
         server.enqueue(new MockResponse().setBody(RESPONSE_BODY_MP3).throttleBody(65536, 1, TimeUnit.SECONDS));
-        assertSuccessfulRequestFor(createUrlConnection(), RESPONSE_BODY_MP3.readByteArray());
+
+        assertSuccessfulRequestFor(conn, RESPONSE_BODY_MP3.readByteArray());
     }
 
     @Test
     public void should_propagate_request_headers() throws Exception {
         server.enqueue(new MockResponse().setBody(RESPONSE_BODY_MP3));
 
-        HttpURLConnection connection = createUrlConnection();
-        connection.setRequestProperty("Content-Type", "audio/mpeg");
-        connection.setRequestProperty("Accept-Ranges", "bytes");
-        connection.setRequestProperty("Content-Length", "4");
-        connection.setRequestProperty("Content-Range", "bytes 0-3/4");
+        HttpURLConnection conn = createUrlConnection(server.get(), proxy.get());
+        conn.setRequestProperty("Content-Type", "audio/mpeg");
+        conn.setRequestProperty("Accept-Ranges", "bytes");
+        conn.setRequestProperty("Content-Length", "4");
+        conn.setRequestProperty("Content-Range", "bytes 0-3/4");
 
-        RecordedRequest request = assertSuccessfulRequestFor(connection, RESPONSE_BODY_MP3.readByteArray());
+        RecordedRequest request = assertSuccessfulRequestFor(conn, RESPONSE_BODY_MP3.readByteArray());
         assertEquals("audio/mpeg", request.getHeader("Content-Type"));
         assertEquals("bytes", request.getHeader("Accept-Ranges"));
 //        assertEquals("4", request.getHeader("Content-Length"));
@@ -89,8 +93,9 @@ public class StreamProxyTest {
             new Thread(new Runnable() {
                 @Override
                 public void run() {
+                    HttpURLConnection conn = createUrlConnection(server.get(), proxy.get());
                     await(startLatch);
-                    assertSuccessfulRequestFor(createUrlConnection(), bodyMp3Bytes);
+                    assertSuccessfulRequestFor(conn, bodyMp3Bytes);
                     finishLatch.countDown();
                 }
             }).start();
@@ -117,11 +122,12 @@ public class StreamProxyTest {
 
     @Test
     public void should_write_response_to_output_stream() throws Exception {
+        HttpURLConnection conn = createUrlConnection(server.get(), proxy.get());
         MockForkedStream forkedStream = spy(new MockForkedStream(new Properties()));
         given(proxy.getForkedStreamFactory().createForkedStream(any(Properties.class))).willReturn(forkedStream);
         server.enqueue(new MockResponse().setBody(RESPONSE_BODY_MP3));
 
-        readFully(createUrlConnection().getInputStream());
+        readFully(conn.getInputStream());
         byte[] bytes = forkedStream.toByteArray();
 
         assertArrayEquals(RESPONSE_BODY_MP3.readByteArray(), bytes);
@@ -130,12 +136,13 @@ public class StreamProxyTest {
     @Test
     public void should_pass_query_parameters_to_forked_stream_factory() throws Exception {
         server.enqueue(new MockResponse().setBody(RESPONSE_BODY_MP3));
+        HttpURLConnection conn = createUrlConnection(server.get(), proxy.get(), "?param1=abc&param2=def");
 
-        readFully(createUrlConnection("?param1=abc&param2=def").getInputStream());
-        Properties props = ((MockForkedStreamFactory) proxy.getForkedStreamFactory()).getLastProps();
+        readFully(conn.getInputStream());
+        Properties queryParams = ((MockForkedStreamFactory) proxy.getForkedStreamFactory()).getLatestQueryParams();
 
-        assertThat(props.getProperty("param1"), equalTo("abc"));
-        assertThat(props.getProperty("param2"), equalTo("def"));
+        assertThat(queryParams.getProperty("param1"), equalTo("abc"));
+        assertThat(queryParams.getProperty("param2"), equalTo("def"));
     }
 
     private RecordedRequest assertSuccessfulRequestFor(HttpURLConnection connection, byte[] expectedBody) {
@@ -150,68 +157,7 @@ public class StreamProxyTest {
 
         } catch (IOException | InterruptedException e) {
             fail();
-            return null;
         }
-    }
-
-    private HttpURLConnection createUrlConnection(String queryParams) {
-        try {
-            String serverUrl = server.getUrl("/" + queryParams).toString();
-            String proxiedUrl = String.format("http://127.0.0.1:%d/%s", proxy.getPort(), serverUrl);
-            URL url = new URL(proxiedUrl);
-            return (HttpURLConnection) url.openConnection();
-
-        } catch (IOException e) {
-            fail();
-            return null;
-        }
-    }
-
-    private HttpURLConnection createUrlConnection() {
-        return createUrlConnection("");
-    }
-
-    private byte[] readFully(InputStream is) throws IOException {
-        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-        int nRead;
-        byte[] data = new byte[16384];
-
-        while ((nRead = is.read(data, 0, data.length)) != -1) {
-            buffer.write(data, 0, nRead);
-        }
-
-        buffer.flush();
-
-        return buffer.toByteArray();
-    }
-
-    private void readThenDrop(InputStream is) throws IOException {
-        byte[] data = new byte[16384];
-        is.read(data, 0, data.length);
-        is.read(data, 0, data.length);
-        is.read(data, 0, data.length);
-        is.close();
-    }
-
-    private void await(CountDownLatch latch) {
-        try {
-            latch.await();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-    }
-
-    private static Buffer loadSampleMp3() {
-        Buffer result = new Buffer();
-        try {
-            File resource = new File("src/test/resources/track.mp3");
-            Source source = Okio.source(resource);
-            result.writeAll(source);
-
-        } catch (IOException e) {
-            throw new RuntimeException("Unable to load sample MP3 from resources. Is it there in folder?");
-        }
-
-        return result;
+        return null;
     }
 }
